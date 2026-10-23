@@ -461,7 +461,7 @@ namespace WebDeployer
                 // Elenco dei file caricati, accanto alla cartella del progetto (es. projects\sito.deploy.json)
                 var manifest = _localFolder.Text.TrimEnd('\\') + ".deploy.json";
                 var result = await FtpDeployer.UploadAsync(target, output, manifest, uploadAll, _deleteObsolete.Checked,
-                    Log, progress, ActionToken);
+                    _spaHtaccess.Checked, Log, progress, ActionToken);
                 Log($"Caricamento completato in {timer.Elapsed.TotalSeconds:0.0} s: {result}.");
                 return true;
             }
@@ -516,6 +516,7 @@ namespace WebDeployer
             _settings.FtpEncryption = EncryptionValues[Math.Max(0, _ftpEncryption.SelectedIndex)];
             _settings.FtpAcceptAnyCertificate = _ftpAcceptAnyCertificate.Checked;
             _settings.DeleteObsoleteFiles = _deleteObsolete.Checked;
+            _settings.AddSpaHtaccess = _spaHtaccess.Checked;
             try { _settings.Save(AppPaths.SettingsFile); }
             catch (Exception ex) { Log("Impossibile salvare le impostazioni: " + ex.Message); }
         }

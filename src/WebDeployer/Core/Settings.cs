@@ -27,6 +27,9 @@ namespace WebDeployer.Core
         /// <summary>Modalità dell'interfaccia: "friendly" (Anita friendly) o "professional".</summary>
         [DataMember(Order = 12)] public string UiMode { get; set; }
 
+        /// <summary>Aggiunge il .htaccess per React Router se la build non ne ha uno suo.</summary>
+        [DataMember(Order = 13)] public bool AddSpaHtaccess { get; set; }
+
         public Settings() => SetDefaults();
 
         // Il deserializzatore non chiama il costruttore: i valori di default vanno impostati qui
@@ -46,6 +49,7 @@ namespace WebDeployer.Core
             FtpAcceptAnyCertificate = false;
             DeleteObsoleteFiles = false;
             UiMode = ModeProfessional;
+            AddSpaHtaccess = true;
         }
 
         /// <summary>Carica le impostazioni; se il file è illeggibile ne fa una copia .bak e riparte dai default.</summary>

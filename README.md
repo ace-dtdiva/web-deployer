@@ -10,6 +10,7 @@ li costruisce e li carica sull'hosting via FTP/FTPS.
 - **Pubblica**: **Build e carica** fa tutto in un clic, oppure **Solo build** / **Solo FTP**
   - carica solo i file cambiati dall'ultimo caricamento
   - se vuoi, elimina dal server i file delle build precedenti, ma solo quelli caricati da WebDeployer
+  - aggiunge il `.htaccess` che fa funzionare le pagine interne dei siti con React Router (hosting Apache)
   - la password FTP non viene mai salvata su disco
 - Due modalità, selezionabili in alto a destra:
   - **Professional**: tutto, con log, versioni degli strumenti e scheda FTP
@@ -55,6 +56,13 @@ Da qui in poi si può passare ad **Anita friendly**: la modalità scelta viene r
 - Se sul server manca `index.html` (es. hosting svuotato) ricarica tutto da solo; **Ricarica tutti i file** (scheda FTP) lo forza.
 - **Elimina dal server i file delle build precedenti** (spenta di default) cancella solo file che WebDeployer stesso aveva caricato:
   gli altri file presenti sul server non vengono mai toccati.
+- **Aggiungi .htaccess per React Router** (attiva di default): i siti Lovable hanno una sola pagina vera (`index.html`) e
+  gli indirizzi interni come `/contatti` li gestisce React Router nel browser; aperti da un link o ricaricati, su Apache
+  darebbero errore 404. Il `.htaccess` dice al server di rispondere con `index.html`. Regole:
+  - se la build ha già un suo `.htaccess` (es. `public/.htaccess` nel progetto) si usa quello;
+  - se sul server c'è già un `.htaccess` diverso (del provider o modificato a mano) non viene mai sovrascritto né cancellato:
+    il log mostra le righe da aggiungere a mano;
+  - non serve per gli hosting Nginx o IIS, che ignorano il `.htaccess`.
 
 ## Problemi comuni
 | Messaggio | Cosa fare |
@@ -64,7 +72,7 @@ Da qui in poi si può passare ad **Anita friendly**: la modalità scelta viene r
 | La cartella remota non esiste sul server | Controlla il percorso nella scheda FTP (es. `/public_html`, `/htdocs`, `/www.miosito.it`) |
 | Server non raggiungibile / timeout | Controlla indirizzo, porta e connessione |
 | git pull fallito | Di solito ci sono file modificati a mano nella cartella del progetto: cancella `projects\<nome>` e premi di nuovo **Clona** |
-| La pagina online dà errore 404 se ricaricata | Serve un `.htaccess` per le app con React Router (vedi [ROADMAP.md](ROADMAP.md)) |
+| La pagina online dà errore 404 se ricaricata | Controlla che **Aggiungi .htaccess per React Router** sia attiva (scheda FTP). Se sul server c'era già un `.htaccess`, il log dice quali righe aggiungere; su hosting Nginx la regola va impostata nel pannello del provider |
 | Errore imprevisto | I dettagli sono in `WebDeployer-errori.log`, accanto all'exe |
 
 ## Compilare

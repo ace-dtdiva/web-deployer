@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Threading;
@@ -38,13 +40,18 @@ namespace WebDeployer.Core
         /// cambiati e, se richiesto, elimina dal server i file caricati in precedenza da WebDeployer che non fanno più
         /// parte della build: gli altri file sul server non vengono mai toccati.
         /// Le pagine .html vanno per ultime, così il sito online non punta mai a file non ancora caricati.
+        /// Con addSpaHtaccess aggiunge il .htaccess per React Router se la build non ne ha uno suo.
         /// </summary>
         public static async Task<DeployResult> UploadAsync(FtpTarget target, string localFolder, string manifestPath,
-            bool uploadAll, bool deleteObsolete, Action<string> log, IProgress<double> progress, CancellationToken cancel = default)
+            bool uploadAll, bool deleteObsolete, bool addSpaHtaccess, Action<string> log, IProgress<double> progress,
+            CancellationToken cancel = default)
         {
             var files = LocalFile.Scan(localFolder);
+            var htaccess = addSpaHtaccess && !files.Any(f => f.RelativePath == SpaHtaccess.FileName)
+                ? LocalFile.Generated(SpaHtaccess.FileName, SpaHtaccess.Bytes)
+                : null;
+            if (htaccess != null) files.Add(htaccess);
             await Task.Run(() => LocalFile.ComputeHashes(files, cancel), cancel);
-            var inBuild = new HashSet<string>(files.Select(f => f.RelativePath), StringComparer.Ordinal);
 
             // Ciò che WebDeployer ha già caricato su questo server (vuoto la prima volta o se server/cartella sono cambiati)
             var deployed = DeployManifest.Load(manifestPath).FilesFor(target.Key);
@@ -54,6 +61,10 @@ namespace WebDeployer.Core
                 using (var client = CreateClient(target))
                 {
                     await ConnectAsync(client, target, log, cancel);
+
+                    if (htaccess != null && !await CanUploadHtaccessAsync(client, target, htaccess, deployed, log, cancel))
+                        files.Remove(htaccess);
+                    var inBuild = new HashSet<string>(files.Select(f => f.RelativePath), StringComparer.Ordinal);
 
                     // Se il sito sul server è stato cancellato o sostituito a mano l'elenco non vale più
                     if (!uploadAll && deployed.Count > 0 && inBuild.Contains("index.html")
@@ -68,8 +79,10 @@ namespace WebDeployer.Core
                         .OrderBy(f => f.IsHtml ? 1 : 0)
                         .ThenBy(f => f.RelativePath, StringComparer.Ordinal)
                         .ToList();
+                    // Il .htaccess non si cancella mai: potrebbe contenere regole aggiunte a mano
                     var obsolete = deleteObsolete
-                        ? deployed.Keys.Where(path => !inBuild.Contains(path)).OrderBy(path => path, StringComparer.Ordinal).ToList()
+                        ? deployed.Keys.Where(path => !inBuild.Contains(path) && path != SpaHtaccess.FileName)
+                            .OrderBy(path => path, StringComparer.Ordinal).ToList()
                         : new List<string>();
                     result.Unchanged = files.Count - queue.Count;
                     if (queue.Count == 0 && obsolete.Count == 0)
@@ -83,8 +96,10 @@ namespace WebDeployer.Core
                         var fileProgress = new InlineProgress<FtpProgress>(p =>
                             progress?.Report((doneBefore + p.TransferredBytes) / (double)totalBytes));
 
-                        var status = await client.UploadFile(file.FullPath, target.RemotePath(file.RelativePath),
-                            FtpRemoteExists.Overwrite, true, FtpVerify.None, fileProgress, cancel);
+                        var remote = target.RemotePath(file.RelativePath);
+                        var status = file.Content != null
+                            ? await client.UploadBytes(file.Content, remote, FtpRemoteExists.Overwrite, true, fileProgress, cancel)
+                            : await client.UploadFile(file.FullPath, remote, FtpRemoteExists.Overwrite, true, FtpVerify.None, fileProgress, cancel);
                         if (status == FtpStatus.Failed)
                             throw new DeployException($"caricamento di {file.RelativePath} non riuscito.");
 
@@ -115,6 +130,40 @@ namespace WebDeployer.Core
             }
             progress?.Report(1);
             return result;
+        }
+
+        /// <summary>
+        /// Decide se caricare il .htaccess generato. Se sul server ce n'è già uno diverso (del provider o
+        /// modificato a mano) non lo tocca e spiega nel log cosa aggiungere. False = non caricarlo.
+        /// </summary>
+        private static async Task<bool> CanUploadHtaccessAsync(AsyncFtpClient client, FtpTarget target, LocalFile htaccess,
+            Dictionary<string, string> deployed, Action<string> log, CancellationToken cancel)
+        {
+            // Si prova a scaricarlo invece di guardare l'elenco: alcuni server nascondono i file che iniziano col punto
+            var remote = target.RemotePath(SpaHtaccess.FileName);
+            var exists = await client.FileExists(remote, cancel);
+            byte[] existing = null;
+            try { existing = await client.DownloadBytes(remote, cancel); }
+            catch (Exception ex) when (ex is FtpException || ex is IOException) { }
+
+            if (existing == null && !exists)
+            {
+                deployed.Remove(htaccess.RelativePath); // va caricato anche se l'elenco dice che c'era
+                log("Aggiungo il .htaccess per React Router: le pagine interne del sito funzioneranno anche se ricaricate.");
+                return true;
+            }
+            if (existing != null && SpaHtaccess.IsOurs(Encoding.UTF8.GetString(existing)))
+            {
+                deployed[htaccess.RelativePath] = htaccess.Hash; // è già il nostro: si ricarica solo con "Ricarica tutti i file"
+                return true;
+            }
+
+            deployed.Remove(htaccess.RelativePath); // non è nostro: mai sovrascriverlo né cancellarlo
+            log("Sul server c'è già un .htaccess non creato da WebDeployer: non lo sovrascrivo.");
+            log("Se le pagine interne del sito danno errore 404 quando le ricarichi, aggiungi a mano queste righe al .htaccess del server:");
+            foreach (var line in SpaHtaccess.Content.Split('\n').Where(l => l.Length > 0 && !l.StartsWith("#")))
+                log("        " + line);
+            return false;
         }
 
         /// <summary>IProgress che richiama subito l'azione, senza passare dal thread dell'interfaccia.</summary>

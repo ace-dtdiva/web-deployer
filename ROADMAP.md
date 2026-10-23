@@ -14,11 +14,11 @@ Ogni step lascia l'app compilabile e funzionante, con un commit dedicato.
 - [x] 8. Upload incrementale (solo i file cambiati) con pulizia opzionale dei file obsoleti
 - [x] Grafica del design "WebDeployer – redesign" con logo animato e modalità Anita friendly / Professional
 - [x] 9. Rifinitura: icona, protezioni e messaggi d'errore, README, versione 1.0.0
+- [x] `.htaccess` per le app con React Router su hosting Apache: aggiunto in automatico, mai sovrascritto se sul server ce n'è già uno (1.1.0)
 
 ## Miglioramenti futuri
 - Più progetti salvati (elenco), ognuno con repo, cartella e profilo FTP
 - Salvataggio della password FTP cifrata (Windows DPAPI)
-- `.htaccess` per le app con React Router su hosting Apache (da approfondire)
 - Interfaccia in inglese
 - Cartella dei progetti clonati selezionabile (ora è `projects\` accanto all'exe)
 - Node e Git portabili scaricati dall'app se mancano

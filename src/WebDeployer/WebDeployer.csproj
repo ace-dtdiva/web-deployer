@@ -10,7 +10,7 @@
     <Product>WebDeployer (Anita's Website Deployer)</Product>
     <AssemblyTitle>WebDeployer - Anita's Website Deployer</AssemblyTitle>
     <Description>Clona, prova, costruisce e pubblica via FTP siti React + Vite</Description>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <DebugType>embedded</DebugType>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>

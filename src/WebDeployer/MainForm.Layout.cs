@@ -56,6 +56,7 @@ namespace WebDeployer
         private TextBox _ftpRemoteDir;
         private ComboBox _ftpEncryption;
         private CheckBox _ftpAcceptAnyCertificate;
+        private CheckBox _spaHtaccess;
         private CheckBox _deleteObsolete;
 
         /// <summary>Messaggi di un'operazione per la modalità Anita friendly.</summary>
@@ -359,6 +360,13 @@ namespace WebDeployer
 
             var upload = NewCard();
             AddHeader(upload, 0, "Caricamento", "Caricamento");
+            _spaHtaccess = NewCheckBox("Aggiungi .htaccess per React Router (hosting Apache)", _settings.AddSpaHtaccess);
+            _spaHtaccess.CheckedChanged += (s, e) => SaveSettings();
+            _tips.SetToolTip(_spaHtaccess,
+                "Fa funzionare le pagine interne del sito (es. /contatti) anche se aperte da un link o ricaricate.\n" +
+                "Si aggiunge solo se la build non ha già un suo .htaccess, e non sovrascrive mai\n" +
+                "un .htaccess già presente sul server: in quel caso il log dice cosa aggiungere a mano.");
+            upload.Controls.Add(_spaHtaccess);
             _deleteObsolete = NewCheckBox("Elimina dal server i file delle build precedenti", _settings.DeleteObsoleteFiles);
             _deleteObsolete.CheckedChanged += (s, e) => SaveSettings();
             upload.Controls.Add(_deleteObsolete);
