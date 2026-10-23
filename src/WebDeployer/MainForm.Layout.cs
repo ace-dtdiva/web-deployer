@@ -189,11 +189,24 @@ namespace WebDeployer
                 BackColor = Theme.Surface,
                 Padding = new Padding(24, 1, 24, 0),
             };
-            var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1 };
+            var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1 };
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             row.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+            var version = typeof(MainForm).Assembly.GetName().Version;
+            var versionLabel = new Label
+            {
+                Text = $"v{version.Major}.{version.Minor}.{version.Build}",
+                AutoSize = true,
+                Font = Theme.Regular(12),
+                ForeColor = Theme.TextDisabled,
+                Anchor = AnchorStyles.Right,
+                Margin = new Padding(16, 0, 0, 0),
+            };
+            row.Controls.Add(versionLabel, 3, 0);
 
             _footerStatus = new StatusDot { Text = "Pronto", DotColor = Theme.Success, Anchor = AnchorStyles.Left, Font = Theme.Regular(13) };
             _progress = new ThinProgress { Anchor = AnchorStyles.Right, Visible = false, Margin = new Padding(12, 0, 0, 0) };
