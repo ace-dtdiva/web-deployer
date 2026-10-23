@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using WebDeployer.Core;
 
 namespace WebDeployer
 {
@@ -12,6 +13,8 @@ namespace WebDeployer
         [STAThread]
         private static void Main()
         {
+            EmbeddedAssemblies.Register();
+
             // Testo nitido sugli schermi ad alta risoluzione
             SetProcessDPIAware();
 

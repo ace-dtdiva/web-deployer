@@ -37,6 +37,19 @@ namespace WebDeployer
 
         private CheckBox _pullBeforeBuild;
 
+        private TabControl _tabs;
+        private TabPage _ftpPage;
+        private TextBox _ftpHost;
+        private TextBox _ftpPort;
+        private TextBox _ftpUser;
+        private TextBox _ftpPassword; // mai salvata su disco
+        private TextBox _ftpRemoteDir;
+        private ComboBox _ftpEncryption;
+        private CheckBox _ftpAcceptAnyCertificate;
+
+        private static readonly string[] EncryptionValues = { FtpTarget.EncryptionAuto, FtpTarget.EncryptionRequired, FtpTarget.EncryptionNone };
+        private static readonly string[] EncryptionLabels = { "FTPS se disponibile (consigliato)", "Solo FTPS (TLS esplicito)", "FTP non cifrato" };
+
         public MainForm()
         {
             SuspendLayout();
@@ -62,8 +75,9 @@ namespace WebDeployer
             _settings = Settings.Load(AppPaths.SettingsFile, out _settingsError);
 
             var tabs = new TabControl { Dock = DockStyle.Fill };
+            _tabs = tabs;
             tabs.TabPages.Add(BuildProjectTab());
-            tabs.TabPages.Add(BuildFtpTab());
+            tabs.TabPages.Add(_ftpPage = BuildFtpTab());
 
             // La parte alta resta della sua altezza, il log prende lo spazio quando la finestra si ingrandisce
             var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, FixedPanel = FixedPanel.Panel1 };
@@ -102,24 +116,14 @@ namespace WebDeployer
         {
             var page = new TabPage("Progetto") { Padding = new Padding(10) };
 
-            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3 };
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            var grid = NewFormGrid();
 
             _repoUrl = new TextBox { Dock = DockStyle.Fill, Text = _settings.RepoUrl };
             _repoUrl.TextChanged += (s, e) => _localFolder.Text = AppPaths.LocalFolderFor(_repoUrl.Text);
             _repoUrl.Leave += (s, e) => SaveSettings();
             var clone = ActionButton("Clona", () => RunActionAsync("Clone", CloneAsync));
             AddRow(grid, "Repository Git:", _repoUrl, clone);
-
-            grid.Controls.Add(new Label
-            {
-                Text = "Incolla l'URL del repository GitHub del sito (per esempio quello collegato a Lovable).",
-                AutoSize = true,
-                ForeColor = SystemColors.GrayText,
-                Margin = new Padding(3, 0, 3, 8),
-            }, 1, grid.RowCount++);
+            AddHint(grid, "Incolla l'URL del repository GitHub del sito (per esempio quello collegato a Lovable).");
 
             _localFolder = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Text = AppPaths.LocalFolderFor(_settings.RepoUrl) };
             var openFolder = new Button { Text = "Apri", AutoSize = true };
@@ -175,6 +179,28 @@ namespace WebDeployer
             };
             box.Controls.Add(Flow(controls));
             return box;
+        }
+
+        /// <summary>Griglia etichetta | campo | pulsante.</summary>
+        private static TableLayoutPanel NewFormGrid()
+        {
+            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3 };
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            return grid;
+        }
+
+        /// <summary>Riga di aiuto in grigio sotto il campo precedente.</summary>
+        private static void AddHint(TableLayoutPanel grid, string text)
+        {
+            grid.Controls.Add(new Label
+            {
+                Text = text,
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Margin = new Padding(3, 0, 3, 8),
+            }, 1, grid.RowCount++);
         }
 
         private static void AddRow(TableLayoutPanel grid, string label, Control field, Control button)
@@ -476,6 +502,12 @@ namespace WebDeployer
         {
             _settings.RepoUrl = _repoUrl.Text.Trim();
             _settings.PullBeforeBuild = _pullBeforeBuild.Checked;
+            _settings.FtpHost = FtpTarget.CleanHost(_ftpHost.Text);
+            _settings.FtpPort = int.TryParse(_ftpPort.Text.Trim(), out var port) && port > 0 && port < 65536 ? port : 21;
+            _settings.FtpUser = _ftpUser.Text.Trim();
+            _settings.FtpRemoteDir = FtpTarget.CleanRemoteDir(_ftpRemoteDir.Text);
+            _settings.FtpEncryption = EncryptionValues[Math.Max(0, _ftpEncryption.SelectedIndex)];
+            _settings.FtpAcceptAnyCertificate = _ftpAcceptAnyCertificate.Checked;
             try { _settings.Save(AppPaths.SettingsFile); }
             catch (Exception ex) { Log("Impossibile salvare le impostazioni: " + ex.Message); }
         }
@@ -516,8 +548,101 @@ namespace WebDeployer
         private TabPage BuildFtpTab()
         {
             var page = new TabPage("FTP") { Padding = new Padding(10) };
-            page.Controls.Add(new Label { Text = "Impostazioni FTP: in arrivo.", AutoSize = true });
+            var grid = NewFormGrid();
+            grid.Dock = DockStyle.Top;
+
+            _ftpHost = new TextBox { Dock = DockStyle.Fill, Text = _settings.FtpHost };
+            AddRow(grid, "Server:", _ftpHost, null);
+            AddHint(grid, "L'indirizzo FTP indicato dal provider, per esempio ftp.miosito.it");
+
+            _ftpPort = new TextBox { Width = 60, Text = _settings.FtpPort.ToString() };
+            AddRow(grid, "Porta:", _ftpPort, null);
+
+            _ftpUser = new TextBox { Dock = DockStyle.Fill, Text = _settings.FtpUser };
+            AddRow(grid, "Utente:", _ftpUser, null);
+
+            _ftpPassword = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
+            AddRow(grid, "Password:", _ftpPassword, null);
+            AddHint(grid, "La password non viene salvata: resta in memoria finché WebDeployer è aperto.");
+
+            _ftpRemoteDir = new TextBox { Dock = DockStyle.Fill, Text = _settings.FtpRemoteDir };
+            AddRow(grid, "Cartella remota:", _ftpRemoteDir, null);
+            AddHint(grid, "La cartella del sito sul server, per esempio /public_html, /htdocs o /www.miosito.it");
+
+            _ftpEncryption = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260 };
+            _ftpEncryption.Items.AddRange(EncryptionLabels);
+            _ftpEncryption.SelectedIndex = Math.Max(0, Array.IndexOf(EncryptionValues, _settings.FtpEncryption));
+            AddRow(grid, "Cifratura:", _ftpEncryption, null);
+
+            _ftpAcceptAnyCertificate = new CheckBox
+            {
+                Text = "Accetta certificati non validi (es. intestati al provider invece che al tuo dominio)",
+                AutoSize = true,
+                Checked = _settings.FtpAcceptAnyCertificate,
+            };
+            AddRow(grid, "", _ftpAcceptAnyCertificate, null);
+
+            var test = ActionButton("Test connessione", () => RunActionAsync("Test connessione", TestFtpAsync));
+            AddRow(grid, "", Flow(test), null);
+
+            foreach (var box in new Control[] { _ftpHost, _ftpPort, _ftpUser, _ftpRemoteDir, _ftpEncryption, _ftpAcceptAnyCertificate })
+                box.Leave += (s, e) => SaveSettings();
+
+            page.Controls.Add(grid);
             return page;
+        }
+
+        /// <summary>Legge i dati FTP dalla scheda; chiede la password se manca. Null se i dati non bastano.</summary>
+        private FtpTarget ReadFtpTarget()
+        {
+            SaveSettings();
+            var host = FtpTarget.CleanHost(_ftpHost.Text);
+            var user = _ftpUser.Text.Trim();
+            if (host.Length == 0 || user.Length == 0)
+            {
+                Log("Compila server e utente nella scheda FTP.");
+                _tabs.SelectedTab = _ftpPage;
+                return null;
+            }
+
+            if (_ftpPassword.Text.Length == 0)
+            {
+                var password = PasswordPrompt.Ask(this, $"Password FTP per {user}@{host}:");
+                if (password == null)
+                {
+                    Log("Operazione annullata: password FTP non inserita.");
+                    return null;
+                }
+                _ftpPassword.Text = password;
+            }
+
+            return new FtpTarget
+            {
+                Host = host,
+                Port = _settings.FtpPort,
+                User = user,
+                Password = _ftpPassword.Text,
+                RemoteDir = FtpTarget.CleanRemoteDir(_ftpRemoteDir.Text),
+                Encryption = _settings.FtpEncryption,
+                AcceptAnyCertificate = _ftpAcceptAnyCertificate.Checked,
+            };
+        }
+
+        private async Task TestFtpAsync()
+        {
+            var target = ReadFtpTarget();
+            if (target == null) return;
+
+            Log($"Test connessione FTP: {target}");
+            try
+            {
+                await FtpDeployer.TestAsync(target, Log);
+                Log("Connessione FTP riuscita.");
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                Log("Connessione FTP non riuscita: " + FtpDeployer.Explain(ex));
+            }
         }
 
         private Control BuildLogPanel()

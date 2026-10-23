@@ -16,4 +16,26 @@
     <EmbeddedResource Include="Assets\logo.gif" LogicalName="WebDeployer.logo.gif" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="FluentFTP" Version="55.1.0" />
+  </ItemGroup>
+
+  <!-- Le DLL dei pacchetti vengono incorporate nell'exe (le carica Core\EmbeddedAssemblies.cs),
+       così l'app resta un solo file -->
+  <Target Name="EmbedPackageAssemblies" AfterTargets="ResolveReferences">
+    <ItemGroup>
+      <EmbeddedResource Include="@(ReferenceCopyLocalPaths)" Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll'">
+        <LogicalName>%(ReferenceCopyLocalPaths.Filename)%(ReferenceCopyLocalPaths.Extension)</LogicalName>
+      </EmbeddedResource>
+      <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- ...e non vengono copiate nemmeno nella cartella publish -->
+  <Target Name="ExcludeEmbeddedFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.dll'" />
+    </ItemGroup>
+  </Target>
+
 </Project>
