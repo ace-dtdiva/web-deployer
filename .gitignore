@@ -1,0 +1,20 @@
+# Output di compilazione
+bin/
+obj/
+publish/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Dati runtime dell'app (salvati accanto all'exe)
+projects/
+settings.json
+*.log
+
+# Sistema
+Thumbs.db
+Desktop.ini

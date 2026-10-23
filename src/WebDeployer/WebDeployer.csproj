@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>WebDeployer</AssemblyName>
+    <RootNamespace>WebDeployer</RootNamespace>
+    <Product>WebDeployer</Product>
+    <Version>0.1.0</Version>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+</Project>
