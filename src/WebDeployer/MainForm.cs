@@ -28,16 +28,22 @@ namespace WebDeployer
         // Server di sviluppo (npm run dev): attivo finché _previewCancel non è null
         private CancellationTokenSource _previewCancel;
         private Task _previewWatch;
+        private PreviewState _preview = PreviewState.Stopped;
+
+        // Ultimo messaggio dell'app (non dei programmi esterni): in Anita friendly spiega cosa è andato storto
+        private string _lastMessage = "";
 
         private static readonly string[] EncryptionValues = { FtpTarget.EncryptionAuto, FtpTarget.EncryptionRequired, FtpTarget.EncryptionNone };
         private static readonly string[] EncryptionLabels = { "FTPS se disponibile (consigliato)", "Solo FTPS (TLS esplicito)", "FTP non cifrato" };
 
         private enum StatusKind { Ready, Busy, Success, Error }
+        private enum PreviewState { Stopped, Starting, Running }
 
         public MainForm()
         {
             _settings = Settings.Load(AppPaths.SettingsFile, out _settingsError);
             BuildUi();
+            ApplyMode();
 
             Load += async (s, e) =>
             {
@@ -56,20 +62,27 @@ namespace WebDeployer
                 Log($"settings.json illeggibile ({_settingsError}): copiato in settings.json.bak, uso le impostazioni di default.");
         }
 
-        /// <summary>Esegue un'operazione alla volta: disattiva i pulsanti e scrive nel log eventuali errori.</summary>
-        private async Task RunActionAsync(string name, Func<Task<bool>> action)
+        /// <summary>
+        /// Esegue un'operazione alla volta: disattiva i pulsanti e scrive nel log eventuali errori.
+        /// In Anita friendly mostra messaggi semplici e, se qualcosa va storto, una finestra che lo spiega.
+        /// </summary>
+        private async Task RunActionAsync(string name, FriendlyText friendly, Func<Task<bool>> action)
         {
             if (_busy) return;
             _busy = true;
             _actionCancel = new CancellationTokenSource();
             UpdateButtons();
-            SetStatus(name + " in corso…", StatusKind.Busy);
+            SetStatus(Friendly ? friendly.Busy : name + " in corso…", StatusKind.Busy);
+
+            var ok = false;
+            var cancelled = false;
             try
             {
-                await action();
+                ok = await action();
             }
             catch (Exception ex) when (ex is OperationCanceledException || _actionCancel.IsCancellationRequested)
             {
+                cancelled = true;
                 Log("Operazione annullata.");
             }
             catch (Exception ex)
@@ -83,7 +96,21 @@ namespace WebDeployer
                 _busy = false;
                 _progress.Visible = false;
                 UpdateButtons();
+            }
+
+            if (!Friendly)
                 SetStatus("Pronto");
+            else if (ok)
+                SetStatus(friendly.Done, StatusKind.Success);
+            else if (cancelled)
+                SetStatus("Operazione annullata.");
+            else
+            {
+                SetStatus(friendly.Failed, StatusKind.Error);
+                MessageBox.Show(this,
+                    friendly.Failed + "\n\nCosa è successo: " + _lastMessage +
+                    "\n\nSe non è chiaro, passa alla modalità Professional: nel log ci sono tutti i dettagli.",
+                    "Anita's Website Deployer", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -95,6 +122,7 @@ namespace WebDeployer
             foreach (var button in _actionButtons)
                 button.Enabled = !_busy;
             _cancelButton.Enabled = _busy;
+            _footerCancel.Visible = Friendly && _busy;
 
             var previewRunning = _previewCancel != null;
             _previewButton.Enabled = !_busy && !previewRunning;
@@ -219,7 +247,7 @@ namespace WebDeployer
 
             var cancel = new CancellationTokenSource();
             _previewCancel = cancel;
-            SetPreviewState("In avvio…", Theme.Accent);
+            SetPreviewState(PreviewState.Starting);
             UpdateButtons();
 
             Log("npm run dev");
@@ -246,8 +274,9 @@ namespace WebDeployer
         {
             if (_previewCancel == null) return; // fermata nel frattempo
             _previewLink.Text = url;
-            SetPreviewState("In esecuzione", Theme.Success);
+            SetPreviewState(PreviewState.Running);
             Log("Preview pronta: " + url);
+            if (Friendly && !_busy) SetStatus("L'anteprima è aperta nel browser.", StatusKind.Success);
             OpenBrowser(url);
         }
 
@@ -266,7 +295,9 @@ namespace WebDeployer
 
             Log(stoppedByUser ? "Preview fermata." : $"Il server di preview si è chiuso (codice {code}).");
             _previewLink.Text = "";
-            SetPreviewState("Ferma", Theme.Idle);
+            SetPreviewState(PreviewState.Stopped);
+            if (Friendly && !_busy)
+                SetStatus(stoppedByUser ? "Anteprima chiusa." : "L'anteprima si è chiusa da sola.", stoppedByUser ? StatusKind.Ready : StatusKind.Error);
             UpdateButtons();
         }
 
@@ -322,14 +353,21 @@ namespace WebDeployer
             var user = _ftpUser.Text.Trim();
             if (host.Length == 0 || user.Length == 0)
             {
-                Log("Compila server e utente nella scheda FTP.");
-                ShowPage(ftp: true);
+                if (Friendly)
+                    Log("Mancano i dati del server su cui mettere il sito: vanno inseriti in modalità Professional, nella scheda FTP.");
+                else
+                {
+                    Log("Compila server e utente nella scheda FTP.");
+                    ShowPage(ftp: true);
+                }
                 return null;
             }
 
             if (_ftpPassword.Text.Length == 0)
             {
-                var password = PasswordPrompt.Ask(this, $"Password FTP per {user}@{host}:");
+                var password = PasswordPrompt.Ask(this, Friendly
+                    ? "Per mettere il sito online serve la password del server:"
+                    : $"Password FTP per {user}@{host}:");
                 if (password == null)
                 {
                     Log("Operazione annullata: password FTP non inserita.");
@@ -375,7 +413,7 @@ namespace WebDeployer
         /// </summary>
         private async Task<bool> DeployAsync(bool uploadAll = false)
         {
-            SetStatus("Caricamento FTP in corso…", StatusKind.Busy);
+            SetStatus(Friendly ? "Metto il sito online…" : "Caricamento FTP in corso…", StatusKind.Busy);
             var output = OutputFolder(_localFolder.Text);
             if (!File.Exists(Path.Combine(output, "index.html")))
             {
@@ -465,6 +503,7 @@ namespace WebDeployer
                 return;
             }
 
+            if (!message.StartsWith("    ")) _lastMessage = message;
             _logEmpty.Visible = false;
             if (_log.TextLength > MaxLogChars)
                 _log.Text = _log.Text.Substring(_log.TextLength - MaxLogChars / 2);
@@ -489,10 +528,30 @@ namespace WebDeployer
             _footerStatus.DotColor = kind == StatusKind.Busy ? Theme.Accent : kind == StatusKind.Error ? Theme.Danger : Theme.Success;
         }
 
-        private void SetPreviewState(string text, Color dot)
+        private void SetPreviewState(PreviewState state)
         {
-            _previewState.Text = text;
-            _previewState.DotColor = dot;
+            _preview = state;
+            ShowPreviewState();
+        }
+
+        /// <summary>Stato dell'anteprima accanto al titolo, con le parole della modalità corrente.</summary>
+        private void ShowPreviewState()
+        {
+            switch (_preview)
+            {
+                case PreviewState.Starting:
+                    _previewState.Text = Friendly ? "Si sta aprendo…" : "In avvio…";
+                    _previewState.DotColor = Theme.Accent;
+                    break;
+                case PreviewState.Running:
+                    _previewState.Text = Friendly ? "Aperta" : "In esecuzione";
+                    _previewState.DotColor = Theme.Success;
+                    break;
+                default:
+                    _previewState.Text = Friendly ? "Chiusa" : "Ferma";
+                    _previewState.DotColor = Theme.Idle;
+                    break;
+            }
         }
 
         private static void SetBadge(Pill badge, string name, string version)

@@ -10,6 +10,10 @@ Piccolo programma Windows portabile (un solo `.exe`, niente installazione) per p
   - invia solo i file cambiati dall'ultimo caricamento (l'elenco è in `projects\<nome>.deploy.json`)
   - se vuoi, elimina dal server i file delle build precedenti, ma solo quelli caricati da WebDeployer
   - la password FTP non viene mai salvata su disco
+- Due modalità, selezionabili in alto a destra:
+  - **Professional**: tutto, con log, versioni degli strumenti e scheda FTP
+  - **Anita friendly**: solo le tre sezioni, con parole semplici ("Costruisci il sito", "Metti il sito online"),
+    messaggi chiari in basso e una spiegazione se qualcosa va storto. Il server FTP va configurato prima in Professional.
 
 Stato dei lavori e idee future: [ROADMAP.md](ROADMAP.md).
 

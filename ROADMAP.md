@@ -12,6 +12,7 @@ Ogni step lascia l'app compilabile e funzionante, con un commit dedicato.
 - [x] 6. Upload manuale della build, con avanzamento e annullamento
 - [x] 7. Auto deploy: pulsante "Build e carica" (build e upload in un clic)
 - [x] 8. Upload incrementale (solo i file cambiati) con pulizia opzionale dei file obsoleti
+- [x] Grafica del design "WebDeployer – redesign" con logo animato e modalità Anita friendly / Professional
 - [ ] 9. Rifinitura: icona, messaggi d'errore, README, exe finale
 
 ## Miglioramenti futuri

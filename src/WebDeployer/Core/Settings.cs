@@ -8,6 +8,9 @@ namespace WebDeployer.Core
     [DataContract]
     public sealed class Settings
     {
+        public const string ModeFriendly = "friendly";
+        public const string ModeProfessional = "professional";
+
         [DataMember(Order = 1)] public string RepoUrl { get; set; }
         [DataMember(Order = 2)] public bool PullBeforeBuild { get; set; }
         [DataMember(Order = 3)] public string BuildOutputDir { get; set; }
@@ -20,6 +23,9 @@ namespace WebDeployer.Core
         [DataMember(Order = 8)] public string FtpEncryption { get; set; }
         [DataMember(Order = 9)] public bool FtpAcceptAnyCertificate { get; set; }
         [DataMember(Order = 11)] public bool DeleteObsoleteFiles { get; set; }
+
+        /// <summary>Modalità dell'interfaccia: "friendly" (Anita friendly) o "professional".</summary>
+        [DataMember(Order = 12)] public string UiMode { get; set; }
 
         public Settings() => SetDefaults();
 
@@ -39,6 +45,7 @@ namespace WebDeployer.Core
             FtpEncryption = FtpTarget.EncryptionAuto;
             FtpAcceptAnyCertificate = false;
             DeleteObsoleteFiles = false;
+            UiMode = ModeProfessional;
         }
 
         /// <summary>Carica le impostazioni; se il file è illeggibile ne fa una copia .bak e riparte dai default.</summary>
