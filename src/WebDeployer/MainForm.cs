@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using WebDeployer.Core;
@@ -24,8 +25,18 @@ namespace WebDeployer
         private readonly List<Control> _actionButtons = new List<Control>();
         private bool _busy;
 
+        private TableLayoutPanel _projectStack;
         private TextBox _repoUrl;
         private TextBox _localFolder;
+
+        // Server di sviluppo (npm run dev): attivo finché _previewCancel non è null
+        private CancellationTokenSource _previewCancel;
+        private Button _previewButton;
+        private Button _stopButton;
+        private LinkLabel _previewLink;
+        private Task _previewWatch;
+
+        private CheckBox _pullBeforeBuild;
 
         public MainForm()
         {
@@ -55,7 +66,8 @@ namespace WebDeployer
             tabs.TabPages.Add(BuildProjectTab());
             tabs.TabPages.Add(BuildFtpTab());
 
-            var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal };
+            // La parte alta resta della sua altezza, il log prende lo spazio quando la finestra si ingrandisce
+            var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, FixedPanel = FixedPanel.Panel1 };
             split.Panel1.Controls.Add(tabs);
             split.Panel2.Controls.Add(BuildLogPanel());
 
@@ -69,10 +81,14 @@ namespace WebDeployer
             Controls.Add(statusStrip);
             Load += async (s, e) =>
             {
-                split.SplitterDistance = split.Height / 2;
+                FitTopPanel(split, tabs);
                 await CheckToolsAsync();
             };
-            FormClosing += (s, e) => SaveSettings();
+            FormClosing += (s, e) =>
+            {
+                _previewCancel?.Cancel(); // non lasciare node.exe acceso dopo la chiusura
+                SaveSettings();
+            };
 
             ResumeLayout(false);
             PerformLayout();
@@ -86,7 +102,7 @@ namespace WebDeployer
         {
             var page = new TabPage("Progetto") { Padding = new Padding(10) };
 
-            var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3 };
+            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3 };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -97,24 +113,69 @@ namespace WebDeployer
             var clone = ActionButton("Clona", () => RunActionAsync("Clone", CloneAsync));
             AddRow(grid, "Repository Git:", _repoUrl, clone);
 
-            _localFolder = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Text = AppPaths.LocalFolderFor(_settings.RepoUrl) };
-            var openFolder = new Button { Text = "Apri", AutoSize = true };
-            openFolder.Click += (s, e) => OpenFolder(_localFolder.Text);
-            AddRow(grid, "Cartella locale:", _localFolder, openFolder);
-
-            var pull = ActionButton("Aggiorna (git pull)", () => RunActionAsync("Aggiornamento", async () => { await PullAsync(); }));
-            AddRow(grid, "", Flow(pull), null);
-
             grid.Controls.Add(new Label
             {
                 Text = "Incolla l'URL del repository GitHub del sito (per esempio quello collegato a Lovable).",
                 AutoSize = true,
                 ForeColor = SystemColors.GrayText,
-                Margin = new Padding(3, 2, 3, 8),
+                Margin = new Padding(3, 0, 3, 8),
             }, 1, grid.RowCount++);
 
-            page.Controls.Add(grid);
+            _localFolder = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Text = AppPaths.LocalFolderFor(_settings.RepoUrl) };
+            var openFolder = new Button { Text = "Apri", AutoSize = true };
+            openFolder.Click += (s, e) => OpenFolder(_localFolder.Text, "La cartella non esiste ancora: clona prima il repository.");
+            AddRow(grid, "Cartella locale:", _localFolder, openFolder);
+
+            var pull = ActionButton("Aggiorna (git pull)", () => RunActionAsync("Aggiornamento", async () => { await PullAsync(); }));
+            AddRow(grid, "", Flow(pull), null);
+
+            _previewButton = ActionButton("Preview", () => RunActionAsync("Avvio preview", StartPreviewAsync));
+            _stopButton = new Button { Text = "Stop", AutoSize = true, Enabled = false };
+            _stopButton.Click += (s, e) => _previewCancel?.Cancel();
+            _previewLink = new LinkLabel { AutoSize = true, Margin = new Padding(12, 8, 3, 3) };
+            _previewLink.LinkClicked += (s, e) => OpenBrowser(_previewLink.Text);
+
+            var build = ActionButton("Build", () => RunActionAsync("Build", async () => { await BuildAsync(); }));
+            _pullBeforeBuild = new CheckBox
+            {
+                Text = "git pull prima del build",
+                AutoSize = true,
+                Checked = _settings.PullBeforeBuild,
+                Margin = new Padding(12, 7, 3, 3),
+            };
+            _pullBeforeBuild.CheckedChanged += (s, e) => SaveSettings();
+            var openBuild = new Button { Text = "Apri cartella build", AutoSize = true, Margin = new Padding(12, 3, 3, 3) };
+            openBuild.Click += (s, e) => OpenFolder(OutputFolder(_localFolder.Text), "La build non esiste ancora: premi Build.");
+
+            var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1 };
+            _projectStack = stack;
+            stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            stack.Controls.Add(grid);
+            stack.Controls.Add(Section("Sviluppo (npm run dev)", _previewButton, _stopButton, _previewLink));
+            stack.Controls.Add(Section("Produzione (npm run build)", build, _pullBeforeBuild, openBuild));
+
+            // Righe alte quanto il contenuto, più una riga vuota finale che prende lo spazio avanzato
+            foreach (Control _ in stack.Controls) stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            stack.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            stack.RowCount = stack.RowStyles.Count;
+
+            page.Controls.Add(stack);
             return page;
+        }
+
+        private static GroupBox Section(string title, params Control[] controls)
+        {
+            var box = new GroupBox
+            {
+                Text = title,
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(8, 4, 8, 6),
+                Margin = new Padding(3, 10, 3, 3),
+            };
+            box.Controls.Add(Flow(controls));
+            return box;
         }
 
         private static void AddRow(TableLayoutPanel grid, string label, Control field, Control button)
@@ -168,6 +229,10 @@ namespace WebDeployer
         {
             foreach (var button in _actionButtons)
                 button.Enabled = !_busy;
+
+            var previewRunning = _previewCancel != null;
+            _previewButton.Enabled = !_busy && !previewRunning;
+            _stopButton.Enabled = previewRunning;
         }
 
         private async Task CheckToolsAsync()
@@ -235,22 +300,193 @@ namespace WebDeployer
             return code == 0;
         }
 
-        private void OpenFolder(string path)
+        /// <summary>Controlla che il progetto sia clonato e sia un progetto Node.</summary>
+        private bool ProjectReady(string folder)
+        {
+            if (!Git.IsRepo(folder))
+            {
+                Log("Il repository non è ancora clonato: premi Clona.");
+                return false;
+            }
+            if (!Npm.HasPackageJson(folder))
+            {
+                Log("package.json non trovato: la cartella non sembra un progetto Node/Vite.");
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>Installa le dipendenze se mancano o sono cambiate.</summary>
+        private async Task<bool> EnsureInstalledAsync(string folder)
+        {
+            if (!Npm.NeedsInstall(folder)) return true;
+
+            // npm ci installa esattamente le versioni del package-lock.json senza modificare i file del repo;
+            // se il lock non è allineato a package.json si ripiega su npm install (sempre senza scrivere il lock)
+            var code = -1;
+            if (Npm.HasLockFile(folder))
+            {
+                Log("npm ci (installazione delle dipendenze: la prima volta può richiedere qualche minuto)");
+                code = await Npm.RunAsync("ci", folder, LogTool);
+                if (code != 0) Log("npm ci non riuscito: riprovo con npm install.");
+            }
+            if (code != 0)
+            {
+                Log("npm install (installazione delle dipendenze: la prima volta può richiedere qualche minuto)");
+                code = await Npm.RunAsync("install --no-package-lock", folder, LogTool);
+            }
+            if (code != 0)
+            {
+                Log($"Installazione delle dipendenze fallita (codice {code}).");
+                return false;
+            }
+
+            Npm.MarkInstalled(folder);
+            Log("Dipendenze installate.");
+            return true;
+        }
+
+        private async Task StartPreviewAsync()
+        {
+            var folder = _localFolder.Text;
+            if (!ProjectReady(folder) || !await EnsureInstalledAsync(folder)) return;
+
+            var cancel = new CancellationTokenSource();
+            _previewCancel = cancel;
+            UpdateButtons();
+
+            Log("npm run dev");
+            var browserOpened = 0;
+            var server = Npm.RunAsync("run dev", folder, line =>
+            {
+                LogTool(line);
+                var url = Npm.FindLocalUrl(line);
+                if (url != null && Interlocked.Exchange(ref browserOpened, 1) == 0)
+                    RunOnUi(() => OnPreviewReady(url));
+            }, cancel.Token);
+
+            _previewWatch = WatchPreviewAsync(server, cancel);
+        }
+
+        private async Task StopPreviewAsync()
+        {
+            _previewCancel?.Cancel();
+            if (_previewWatch != null) await _previewWatch;
+        }
+
+        /// <summary>git pull (se richiesto), dipendenze, npm run build. Restituisce true se la build è pronta.</summary>
+        private async Task<bool> BuildAsync()
+        {
+            var folder = _localFolder.Text;
+            if (!ProjectReady(folder)) return false;
+
+            if (_pullBeforeBuild.Checked && !await PullAsync())
+            {
+                Log("Build annullata perché git pull non è riuscito (togli la spunta \"git pull prima del build\" per buildare comunque).");
+                return false;
+            }
+
+            // npm ci svuota node_modules: con il server di sviluppo acceso fallirebbe
+            if (Npm.NeedsInstall(folder) && _previewCancel != null)
+            {
+                Log("Le dipendenze sono cambiate: fermo la preview per reinstallarle.");
+                await StopPreviewAsync();
+            }
+            if (!await EnsureInstalledAsync(folder)) return false;
+
+            var output = OutputFolder(folder);
+            Log("npm run build");
+            var timer = Stopwatch.StartNew();
+            var code = await Npm.RunAsync("run build", folder, LogTool);
+            if (code != 0)
+            {
+                Log($"Build fallita (codice {code}).");
+                return false;
+            }
+            if (!File.Exists(Path.Combine(output, "index.html")))
+            {
+                Log($"La build è terminata ma {Path.Combine(output, "index.html")} non esiste: controlla la cartella di output.");
+                return false;
+            }
+
+            var files = Directory.GetFiles(output, "*", SearchOption.AllDirectories);
+            var megabytes = files.Sum(file => new FileInfo(file).Length) / 1024.0 / 1024.0;
+            Log($"Build completata in {timer.Elapsed.TotalSeconds:0.0} s: {files.Length} file, {megabytes:0.00} MB in {output}");
+            return true;
+        }
+
+        private void OnPreviewReady(string url)
+        {
+            if (_previewCancel == null) return; // fermata nel frattempo
+            _previewLink.Text = url;
+            Log("Preview pronta: " + url);
+            OpenBrowser(url);
+        }
+
+        /// <summary>Aspetta la chiusura del server di sviluppo e riattiva i pulsanti.</summary>
+        private async Task WatchPreviewAsync(Task<int> server, CancellationTokenSource cancel)
+        {
+            int code;
+            try { code = await server; }
+            catch (Exception ex) { Log("ERRORE preview: " + ex.Message); code = -1; }
+
+            var stoppedByUser = cancel.IsCancellationRequested;
+            if (_previewCancel == cancel) _previewCancel = null;
+            cancel.Dispose();
+            if (IsDisposed) return;
+
+            Log(stoppedByUser ? "Preview fermata." : $"Il server di preview si è chiuso (codice {code}).");
+            _previewLink.Text = "";
+            UpdateButtons();
+        }
+
+        private void OpenBrowser(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return;
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch (Exception ex) { Log($"Impossibile aprire il browser ({ex.Message}). Apri a mano: {url}"); }
+        }
+
+        /// <summary>Esegue un'azione sul thread dell'interfaccia (da usare nei callback dei processi).</summary>
+        private void RunOnUi(Action action)
+        {
+            if (IsDisposed) return;
+            try { BeginInvoke(action); }
+            catch (InvalidOperationException) { } // finestra in chiusura
+        }
+
+        private void OpenFolder(string path, string missingMessage)
         {
             if (string.IsNullOrEmpty(path) || !Directory.Exists(path))
             {
-                MessageBox.Show(this, "La cartella non esiste ancora: clona prima il repository.", Text,
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, missingMessage, Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
             Process.Start("explorer.exe", $"\"{path}\"");
         }
 
+        /// <summary>Cartella prodotta dalla build (di solito "dist").</summary>
+        private string OutputFolder(string projectFolder)
+        {
+            if (string.IsNullOrEmpty(projectFolder)) return "";
+            var dir = string.IsNullOrWhiteSpace(_settings.BuildOutputDir) ? "dist" : _settings.BuildOutputDir;
+            return Path.Combine(projectFolder, dir);
+        }
+
         private void SaveSettings()
         {
             _settings.RepoUrl = _repoUrl.Text.Trim();
+            _settings.PullBeforeBuild = _pullBeforeBuild.Checked;
             try { _settings.Save(AppPaths.SettingsFile); }
             catch (Exception ex) { Log("Impossibile salvare le impostazioni: " + ex.Message); }
+        }
+
+        /// <summary>Alza la parte superiore quanto basta a mostrare tutta la scheda Progetto.</summary>
+        private void FitTopPanel(SplitContainer split, TabControl tabs)
+        {
+            var content = _projectStack.GetPreferredSize(new Size(_projectStack.ClientSize.Width, 0)).Height;
+            var chrome = tabs.Height - tabs.DisplayRectangle.Height + tabs.TabPages[0].Padding.Vertical;
+            split.SplitterDistance = Math.Max(split.Panel1MinSize, Math.Min(content + chrome + 4, split.Height - 160));
         }
 
         private TabPage BuildFtpTab()
@@ -297,7 +533,10 @@ namespace WebDeployer
         }
 
         /// <summary>Riga di output di un programma esterno: rientrata per distinguerla dai messaggi dell'app.</summary>
-        private void LogTool(string line) => Log("    " + line);
+        private void LogTool(string line)
+        {
+            if (!string.IsNullOrWhiteSpace(line)) Log("    " + line);
+        }
 
         private void SetStatus(string text)
         {

@@ -13,6 +13,8 @@ namespace WebDeployer.Core
         private static readonly DataContractJsonSerializer Serializer = new DataContractJsonSerializer(typeof(Settings));
 
         [DataMember(Order = 1)] public string RepoUrl { get; set; }
+        [DataMember(Order = 2)] public bool PullBeforeBuild { get; set; }
+        [DataMember(Order = 3)] public string BuildOutputDir { get; set; }
 
         public Settings() => SetDefaults();
 
@@ -23,6 +25,8 @@ namespace WebDeployer.Core
         private void SetDefaults()
         {
             RepoUrl = "";
+            PullBeforeBuild = true;
+            BuildOutputDir = "dist";
         }
 
         /// <summary>Carica le impostazioni; se il file è illeggibile ne fa una copia .bak e riparte dai default.</summary>
