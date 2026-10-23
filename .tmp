@@ -1,0 +1,18 @@
+{
+  "Target": "tester@127.0.0.1:2122\/www",
+  "LastDeploy": "2026-10-23T15:11:52",
+  "Files": [
+    {
+      "Path": "assets\/app.js",
+      "Hash": "e6428ef59917ecc37e2d8aac6117a4be2f6b406f1546c37af9173c4cd966dab6"
+    },
+    {
+      "Path": "assets\/sub\/style.css",
+      "Hash": "dd37b84b609288765a57fc32d97f8825c479e438923682eb829fabd622513a4a"
+    },
+    {
+      "Path": "index.html",
+      "Hash": "1c542a47d6b1fdee16406d377706f7d40bb8b00926fde9fc0e4ff2f782f5304a"
+    }
+  ]
+}

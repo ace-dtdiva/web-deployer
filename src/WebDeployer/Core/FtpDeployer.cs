@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
 using System.Security.Authentication;
@@ -33,41 +34,86 @@ namespace WebDeployer.Core
     public static class FtpDeployer
     {
         /// <summary>
-        /// Carica tutti i file della cartella locale nella cartella remota, sovrascrivendo quelli esistenti.
+        /// Carica la build nella cartella remota. Con l'elenco dei caricamenti (manifestPath) carica solo i file
+        /// cambiati e, se richiesto, elimina dal server i file caricati in precedenza da WebDeployer che non fanno più
+        /// parte della build: gli altri file sul server non vengono mai toccati.
         /// Le pagine .html vanno per ultime, così il sito online non punta mai a file non ancora caricati.
         /// </summary>
-        public static async Task<DeployResult> UploadAsync(FtpTarget target, string localFolder, Action<string> log,
-            IProgress<double> progress, CancellationToken cancel = default)
+        public static async Task<DeployResult> UploadAsync(FtpTarget target, string localFolder, string manifestPath,
+            bool uploadAll, bool deleteObsolete, Action<string> log, IProgress<double> progress, CancellationToken cancel = default)
         {
-            var queue = LocalFile.Scan(localFolder)
-                .OrderBy(f => f.IsHtml ? 1 : 0)
-                .ThenBy(f => f.RelativePath, StringComparer.Ordinal)
-                .ToList();
-            var totalBytes = Math.Max(1, queue.Sum(f => f.Length));
+            var files = LocalFile.Scan(localFolder);
+            await Task.Run(() => LocalFile.ComputeHashes(files, cancel), cancel);
+            var inBuild = new HashSet<string>(files.Select(f => f.RelativePath), StringComparer.Ordinal);
+
+            // Ciò che WebDeployer ha già caricato su questo server (vuoto la prima volta o se server/cartella sono cambiati)
+            var deployed = DeployManifest.Load(manifestPath).FilesFor(target.Key);
             var result = new DeployResult();
-
-            using (var client = CreateClient(target))
+            try
             {
-                await ConnectAsync(client, target, log, cancel);
-                foreach (var file in queue)
+                using (var client = CreateClient(target))
                 {
-                    cancel.ThrowIfCancellationRequested();
-                    var doneBefore = result.UploadedBytes;
-                    var fileProgress = new InlineProgress<FtpProgress>(p =>
-                        progress?.Report((doneBefore + p.TransferredBytes) / (double)totalBytes));
+                    await ConnectAsync(client, target, log, cancel);
 
-                    var status = await client.UploadFile(file.FullPath, target.RemotePath(file.RelativePath),
-                        FtpRemoteExists.Overwrite, true, FtpVerify.None, fileProgress, cancel);
-                    if (status == FtpStatus.Failed)
-                        throw new DeployException($"caricamento di {file.RelativePath} non riuscito.");
+                    // Se il sito sul server è stato cancellato o sostituito a mano l'elenco non vale più
+                    if (!uploadAll && deployed.Count > 0 && inBuild.Contains("index.html")
+                        && !await client.FileExists(target.RemotePath("index.html"), cancel))
+                    {
+                        log("index.html non è presente sul server: ricarico tutti i file.");
+                        uploadAll = true;
+                    }
 
-                    result.Uploaded++;
-                    result.UploadedBytes += file.Length;
-                    progress?.Report(result.UploadedBytes / (double)totalBytes);
-                    log("    ↑ " + file.RelativePath);
+                    var queue = files
+                        .Where(f => uploadAll || !deployed.TryGetValue(f.RelativePath, out var hash) || hash != f.Hash)
+                        .OrderBy(f => f.IsHtml ? 1 : 0)
+                        .ThenBy(f => f.RelativePath, StringComparer.Ordinal)
+                        .ToList();
+                    var obsolete = deleteObsolete
+                        ? deployed.Keys.Where(path => !inBuild.Contains(path)).OrderBy(path => path, StringComparer.Ordinal).ToList()
+                        : new List<string>();
+                    result.Unchanged = files.Count - queue.Count;
+                    if (queue.Count == 0 && obsolete.Count == 0)
+                        log("Nessun file cambiato dall'ultimo caricamento.");
+
+                    var totalBytes = Math.Max(1, queue.Sum(f => f.Length));
+                    foreach (var file in queue)
+                    {
+                        cancel.ThrowIfCancellationRequested();
+                        var doneBefore = result.UploadedBytes;
+                        var fileProgress = new InlineProgress<FtpProgress>(p =>
+                            progress?.Report((doneBefore + p.TransferredBytes) / (double)totalBytes));
+
+                        var status = await client.UploadFile(file.FullPath, target.RemotePath(file.RelativePath),
+                            FtpRemoteExists.Overwrite, true, FtpVerify.None, fileProgress, cancel);
+                        if (status == FtpStatus.Failed)
+                            throw new DeployException($"caricamento di {file.RelativePath} non riuscito.");
+
+                        deployed[file.RelativePath] = file.Hash;
+                        result.Uploaded++;
+                        result.UploadedBytes += file.Length;
+                        progress?.Report(result.UploadedBytes / (double)totalBytes);
+                        log("    ↑ " + file.RelativePath);
+                    }
+
+                    foreach (var path in obsolete)
+                    {
+                        cancel.ThrowIfCancellationRequested();
+                        try { await client.DeleteFile(target.RemotePath(path), cancel); }
+                        catch (FtpCommandException) { } // già assente sul server
+                        deployed.Remove(path);
+                        result.Deleted++;
+                        log("    ✗ " + path);
+                    }
+                    await client.Disconnect(cancel);
                 }
-                await client.Disconnect(cancel);
             }
+            finally
+            {
+                // Salvato anche se il caricamento si interrompe: la volta dopo si riparte dai file mancanti
+                if (!string.IsNullOrEmpty(manifestPath) && (result.Uploaded > 0 || result.Deleted > 0))
+                    DeployManifest.Save(manifestPath, target.Key, deployed);
+            }
+            progress?.Report(1);
             return result;
         }
 

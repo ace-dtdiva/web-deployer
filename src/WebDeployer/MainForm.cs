@@ -27,6 +27,7 @@ namespace WebDeployer
         private CancellationTokenSource _actionCancel; // annulla l'operazione in corso
         private Button _cancelButton;
         private readonly ToolStripProgressBar _progress;
+        private readonly ToolTip _tips = new ToolTip { AutoPopDelay = 15000 };
 
         private TextBox _repoUrl;
         private TextBox _localFolder;
@@ -50,6 +51,7 @@ namespace WebDeployer
         private TextBox _ftpRemoteDir;
         private ComboBox _ftpEncryption;
         private CheckBox _ftpAcceptAnyCertificate;
+        private CheckBox _deleteObsolete;
 
         private static readonly string[] EncryptionValues = { FtpTarget.EncryptionAuto, FtpTarget.EncryptionRequired, FtpTarget.EncryptionNone };
         private static readonly string[] EncryptionLabels = { "FTPS se disponibile (consigliato)", "Solo FTPS (TLS esplicito)", "FTP non cifrato" };
@@ -541,6 +543,7 @@ namespace WebDeployer
             _settings.FtpRemoteDir = FtpTarget.CleanRemoteDir(_ftpRemoteDir.Text);
             _settings.FtpEncryption = EncryptionValues[Math.Max(0, _ftpEncryption.SelectedIndex)];
             _settings.FtpAcceptAnyCertificate = _ftpAcceptAnyCertificate.Checked;
+            _settings.DeleteObsoleteFiles = _deleteObsolete.Checked;
             try { _settings.Save(AppPaths.SettingsFile); }
             catch (Exception ex) { Log("Impossibile salvare le impostazioni: " + ex.Message); }
         }
@@ -584,12 +587,18 @@ namespace WebDeployer
             var grid = NewFormGrid();
             grid.Dock = DockStyle.Top;
 
+            // Server e porta sulla stessa riga
             _ftpHost = new TextBox { Dock = DockStyle.Fill, Text = _settings.FtpHost };
-            AddRow(grid, "Server:", _ftpHost, null);
-            AddHint(grid, "L'indirizzo FTP indicato dal provider, per esempio ftp.miosito.it");
-
+            _tips.SetToolTip(_ftpHost, "L'indirizzo FTP indicato dal provider, per esempio ftp.miosito.it");
             _ftpPort = new TextBox { Width = 60, Text = _settings.FtpPort.ToString() };
-            AddRow(grid, "Porta:", _ftpPort, null);
+            var hostRow = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3, Margin = Padding.Empty };
+            hostRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            hostRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            hostRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            hostRow.Controls.Add(_ftpHost, 0, 0);
+            hostRow.Controls.Add(new Label { Text = "Porta:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(12, 6, 3, 3) }, 1, 0);
+            hostRow.Controls.Add(_ftpPort, 2, 0);
+            AddRow(grid, "Server:", hostRow, null);
 
             _ftpUser = new TextBox { Dock = DockStyle.Fill, Text = _settings.FtpUser };
             AddRow(grid, "Utente:", _ftpUser, null);
@@ -615,8 +624,21 @@ namespace WebDeployer
             };
             AddRow(grid, "", _ftpAcceptAnyCertificate, null);
 
+            _deleteObsolete = new CheckBox
+            {
+                Text = "Elimina dal server i file delle build precedenti che non servono più",
+                AutoSize = true,
+                Checked = _settings.DeleteObsoleteFiles,
+            };
+            _deleteObsolete.CheckedChanged += (s, e) => SaveSettings();
+            AddRow(grid, "", _deleteObsolete, null);
+            AddHint(grid, "Solo file caricati da WebDeployer: gli altri file presenti sul server non vengono mai toccati.");
+
             var test = ActionButton("Test connessione", () => RunActionAsync("Test connessione", TestFtpAsync));
-            AddRow(grid, "", Flow(test), null);
+            var uploadAll = ActionButton("Ricarica tutti i file", () => RunActionAsync("Caricamento FTP", async () => { await DeployAsync(uploadAll: true); }));
+            _tips.SetToolTip(uploadAll, "\"Carica via FTP\" invia solo i file cambiati dall'ultimo caricamento.\n" +
+                                        "Questo pulsante li ricarica tutti: utile se il server è stato modificato a mano.");
+            AddRow(grid, "", Flow(test, uploadAll), null);
 
             foreach (var box in new Control[] { _ftpHost, _ftpPort, _ftpUser, _ftpRemoteDir, _ftpEncryption, _ftpAcceptAnyCertificate })
                 box.Leave += (s, e) => SaveSettings();
@@ -689,8 +711,11 @@ namespace WebDeployer
             }
         }
 
-        /// <summary>Carica la build sul server FTP. Restituisce true se il caricamento è completo.</summary>
-        private async Task<bool> DeployAsync()
+        /// <summary>
+        /// Carica la build sul server FTP: solo i file cambiati, oppure tutti con uploadAll.
+        /// Restituisce true se il caricamento è completo.
+        /// </summary>
+        private async Task<bool> DeployAsync(bool uploadAll = false)
         {
             SetStatus("Caricamento FTP in corso...");
             var output = OutputFolder(_localFolder.Text);
@@ -702,14 +727,17 @@ namespace WebDeployer
             var target = ReadFtpTarget();
             if (target == null) return false;
 
-            Log($"Caricamento via FTP di {output} su {target}");
+            Log($"Caricamento via FTP di {output} su {target}" + (uploadAll ? " (tutti i file)" : ""));
             _progress.Value = 0;
             _progress.Visible = true;
             var progress = new Progress<double>(p => _progress.Value = Math.Max(0, Math.Min(100, (int)(p * 100))));
             try
             {
                 var timer = Stopwatch.StartNew();
-                var result = await FtpDeployer.UploadAsync(target, output, Log, progress, ActionToken);
+                // Elenco dei file caricati, accanto alla cartella del progetto (es. projects\sito.deploy.json)
+                var manifest = _localFolder.Text.TrimEnd('\\') + ".deploy.json";
+                var result = await FtpDeployer.UploadAsync(target, output, manifest, uploadAll, _deleteObsolete.Checked,
+                    Log, progress, ActionToken);
                 Log($"Caricamento completato in {timer.Elapsed.TotalSeconds:0.0} s: {result}.");
                 return true;
             }

@@ -1,8 +1,6 @@
 using System;
 using System.IO;
 using System.Runtime.Serialization;
-using System.Runtime.Serialization.Json;
-using System.Text;
 
 namespace WebDeployer.Core
 {
@@ -10,8 +8,6 @@ namespace WebDeployer.Core
     [DataContract]
     public sealed class Settings
     {
-        private static readonly DataContractJsonSerializer Serializer = new DataContractJsonSerializer(typeof(Settings));
-
         [DataMember(Order = 1)] public string RepoUrl { get; set; }
         [DataMember(Order = 2)] public bool PullBeforeBuild { get; set; }
         [DataMember(Order = 3)] public string BuildOutputDir { get; set; }
@@ -24,6 +20,7 @@ namespace WebDeployer.Core
         [DataMember(Order = 8)] public string FtpEncryption { get; set; }
         [DataMember(Order = 9)] public bool FtpAcceptAnyCertificate { get; set; }
         [DataMember(Order = 10)] public bool AutoDeploy { get; set; }
+        [DataMember(Order = 11)] public bool DeleteObsoleteFiles { get; set; }
 
         public Settings() => SetDefaults();
 
@@ -43,6 +40,7 @@ namespace WebDeployer.Core
             FtpEncryption = FtpTarget.EncryptionAuto;
             FtpAcceptAnyCertificate = false;
             AutoDeploy = false;
+            DeleteObsoleteFiles = false;
         }
 
         /// <summary>Carica le impostazioni; se il file è illeggibile ne fa una copia .bak e riparte dai default.</summary>
@@ -52,10 +50,7 @@ namespace WebDeployer.Core
             if (!File.Exists(path)) return new Settings();
             try
             {
-                // ReadAllText toglie l'eventuale BOM (es. file salvato dal Blocco note), che il deserializzatore rifiuta
-                var json = File.ReadAllText(path);
-                using (var stream = new MemoryStream(new UTF8Encoding(false).GetBytes(json)))
-                    return (Settings)Serializer.ReadObject(stream) ?? new Settings();
+                return Json.Read<Settings>(path) ?? new Settings();
             }
             catch (Exception ex)
             {
@@ -65,18 +60,6 @@ namespace WebDeployer.Core
             }
         }
 
-        public void Save(string path)
-        {
-            // Scrive su un file temporaneo e poi lo sostituisce, per non lasciare mai un file a metà
-            var tmp = path + ".tmp";
-            using (var stream = File.Create(tmp))
-            using (var writer = JsonReaderWriterFactory.CreateJsonWriter(stream, new UTF8Encoding(false), false, true, "  "))
-            {
-                Serializer.WriteObject(writer, this);
-            }
-
-            if (File.Exists(path)) File.Replace(tmp, path, null);
-            else File.Move(tmp, path);
-        }
+        public void Save(string path) => Json.Write(path, this);
     }
 }

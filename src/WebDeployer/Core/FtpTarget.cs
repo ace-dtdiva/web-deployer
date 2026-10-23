@@ -40,6 +40,9 @@ namespace WebDeployer.Core
         public string RemotePath(string relativePath) =>
             (RemoteDir == "/" ? "/" : RemoteDir + "/") + relativePath;
 
+        /// <summary>Identifica server e cartella, per sapere se l'elenco dei file caricati vale ancora.</summary>
+        public string Key => $"{User}@{Host.ToLowerInvariant()}:{Port}{RemoteDir}";
+
         public override string ToString() => $"{User}@{Host}:{Port} {RemoteDir}";
     }
 }
