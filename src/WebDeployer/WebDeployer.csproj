@@ -12,4 +12,8 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\logo.gif" LogicalName="WebDeployer.logo.gif" />
+  </ItemGroup>
+
 </Project>

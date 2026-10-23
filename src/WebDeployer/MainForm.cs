@@ -25,7 +25,6 @@ namespace WebDeployer
         private readonly List<Control> _actionButtons = new List<Control>();
         private bool _busy;
 
-        private TableLayoutPanel _projectStack;
         private TextBox _repoUrl;
         private TextBox _localFolder;
 
@@ -46,8 +45,8 @@ namespace WebDeployer
             Font = new Font("Segoe UI", 9F);
             Text = "WebDeployer";
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(900, 640);
-            MinimumSize = new Size(720, 520);
+            ClientSize = new Size(960, 640);
+            MinimumSize = new Size(820, 560);
 
             _log = new TextBox
             {
@@ -69,6 +68,7 @@ namespace WebDeployer
             // La parte alta resta della sua altezza, il log prende lo spazio quando la finestra si ingrandisce
             var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, FixedPanel = FixedPanel.Panel1 };
             split.Panel1.Controls.Add(tabs);
+            split.Panel1.Controls.Add(BuildLogoPanel());
             split.Panel2.Controls.Add(BuildLogPanel());
 
             _status = new ToolStripStatusLabel("Pronto") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
@@ -148,7 +148,6 @@ namespace WebDeployer
             openBuild.Click += (s, e) => OpenFolder(OutputFolder(_localFolder.Text), "La build non esiste ancora: premi Build.");
 
             var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1 };
-            _projectStack = stack;
             stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             stack.Controls.Add(grid);
             stack.Controls.Add(Section("Sviluppo (npm run dev)", _previewButton, _stopButton, _previewLink));
@@ -481,12 +480,37 @@ namespace WebDeployer
             catch (Exception ex) { Log("Impossibile salvare le impostazioni: " + ex.Message); }
         }
 
-        /// <summary>Alza la parte superiore quanto basta a mostrare tutta la scheda Progetto.</summary>
+        /// <summary>Alza la parte superiore quanto basta a mostrare per intero la scheda più alta.</summary>
         private void FitTopPanel(SplitContainer split, TabControl tabs)
         {
-            var content = _projectStack.GetPreferredSize(new Size(_projectStack.ClientSize.Width, 0)).Height;
-            var chrome = tabs.Height - tabs.DisplayRectangle.Height + tabs.TabPages[0].Padding.Vertical;
+            var page = tabs.TabPages[0];
+            var width = tabs.DisplayRectangle.Width - page.Padding.Horizontal;
+            var content = tabs.TabPages.Cast<TabPage>()
+                .SelectMany(p => p.Controls.Cast<Control>())
+                .Max(c => c.GetPreferredSize(new Size(width, 0)).Height);
+            var chrome = tabs.Height - tabs.DisplayRectangle.Height + page.Padding.Vertical;
             split.SplitterDistance = Math.Max(split.Panel1MinSize, Math.Min(content + chrome + 4, split.Height - 160));
+        }
+
+        private static Control BuildLogoPanel()
+        {
+            var logo = new PictureBox
+            {
+                Image = LoadLogo(),
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Dock = DockStyle.Top,
+                Height = 120,
+            };
+            var panel = new Panel { Dock = DockStyle.Right, Width = 212, Padding = new Padding(6, 24, 6, 0) };
+            panel.Controls.Add(logo);
+            return panel;
+        }
+
+        private static Image LoadLogo()
+        {
+            // Lo stream resta aperto: GDI+ lo usa per leggere i fotogrammi della GIF animata
+            var stream = typeof(MainForm).Assembly.GetManifestResourceStream("WebDeployer.logo.gif");
+            return stream == null ? null : Image.FromStream(stream);
         }
 
         private TabPage BuildFtpTab()
