@@ -82,6 +82,7 @@ namespace WebDeployer
             BackColor = Theme.Background;
             ForeColor = Theme.Text;
             Say(this, "WebDeployer", "Anita's Website Deployer");
+            Icon = LoadAppIcon();
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(1100, 800);
             MinimumSize = new Size(900, 640);
@@ -640,6 +641,13 @@ namespace WebDeployer
             var flow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Dock = DockStyle.Fill, Margin = Padding.Empty };
             flow.Controls.AddRange(controls);
             return flow;
+        }
+
+        /// <summary>L'icona dell'app (la stessa dell'exe), per barra del titolo e barra delle applicazioni.</summary>
+        internal static Icon LoadAppIcon()
+        {
+            using (var stream = typeof(MainForm).Assembly.GetManifestResourceStream("WebDeployer.app.ico"))
+                return stream == null ? null : new Icon(stream);
         }
 
         private static Image LoadLogo()
