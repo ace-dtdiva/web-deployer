@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace WebDeployer.Ui
@@ -129,8 +130,11 @@ namespace WebDeployer.Ui
         }
     }
 
-    /// <summary>Riquadro con angoli arrotondati e bordo (le "card" del design).</summary>
-    internal class Card : Panel
+    /// <summary>
+    /// Riquadro con angoli arrotondati e bordo (le "card" del design): una colonna di righe.
+    /// È una TableLayoutPanel perché ricalcola bene l'altezza quando un testo va a capo.
+    /// </summary>
+    internal class Card : TableLayoutPanel
     {
         public Card()
         {
@@ -139,6 +143,8 @@ namespace WebDeployer.Ui
             BackColor = Theme.Surface;
             BorderColor = Theme.Border;
             Padding = new Padding(20, 18, 20, 18);
+            ColumnCount = 1;
+            ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         }
 
         public Color BorderColor { get; set; }
@@ -186,6 +192,12 @@ namespace WebDeployer.Ui
     /// <summary>Campo di testo con bordo arrotondato; il TextBox vero e proprio è <see cref="Box"/>.</summary>
     internal sealed class InputBox : Panel
     {
+        private const int EM_SETCUEBANNER = 0x1501;
+        private string _placeholder;
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
         public InputBox(bool readOnly = false, bool password = false)
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
@@ -203,12 +215,26 @@ namespace WebDeployer.Ui
             Controls.Add(Box);
             Box.GotFocus += (s, e) => Invalidate();
             Box.LostFocus += (s, e) => Invalidate();
+            Box.HandleCreated += (s, e) => ApplyPlaceholder();
             Cursor = Cursors.IBeam;
             Margin = new Padding(0, 3, 0, 3);
             Height = 38;
         }
 
         public TextBox Box { get; }
+
+        /// <summary>Testo grigio mostrato quando il campo è vuoto.</summary>
+        public string Placeholder
+        {
+            get => _placeholder;
+            set { _placeholder = value; ApplyPlaceholder(); }
+        }
+
+        private void ApplyPlaceholder()
+        {
+            if (Box.IsHandleCreated && _placeholder != null)
+                SendMessage(Box.Handle, EM_SETCUEBANNER, (IntPtr)1, _placeholder);
+        }
 
         public override Size GetPreferredSize(Size proposedSize)
         {

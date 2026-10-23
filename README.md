@@ -6,7 +6,7 @@ Piccolo programma Windows portabile (un solo `.exe`, niente installazione) per p
 - Clona il repository Git del sito e lo tiene aggiornato
 - **Preview**: avvia `npm run dev` e apre il sito nel browser predefinito
 - **Build**: esegue `npm run build` (con `git pull` prima, se vuoi)
-- **Carica via FTP/FTPS** la cartella `dist`, anche in automatico dopo la build (**Auto deploy**):
+- **Pubblica via FTP/FTPS** la cartella `dist`: **Build e carica** fa tutto in un clic, oppure **Solo build** / **Solo FTP**:
   - invia solo i file cambiati dall'ultimo caricamento (l'elenco è in `projects\<nome>.deploy.json`)
   - se vuoi, elimina dal server i file delle build precedenti, ma solo quelli caricati da WebDeployer
   - la password FTP non viene mai salvata su disco

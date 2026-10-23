@@ -8,102 +8,40 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using WebDeployer.Core;
+using WebDeployer.Ui;
 
 namespace WebDeployer
 {
-    public class MainForm : Form
+    // Logica della finestra principale; l'interfaccia è costruita in MainForm.Layout.cs
+    public partial class MainForm : Form
     {
         private const int MaxLogChars = 400_000;
 
-        private readonly TextBox _log;
-        private readonly ToolStripStatusLabel _status;
-        private readonly ToolStripStatusLabel _tools;
         private readonly Settings _settings;
         private readonly string _settingsError;
 
-        // Pulsanti disattivati mentre è in corso un'operazione
+        // Un'operazione alla volta: i pulsanti si disattivano e "Annulla operazione" la interrompe
         private readonly List<Control> _actionButtons = new List<Control>();
         private bool _busy;
-        private CancellationTokenSource _actionCancel; // annulla l'operazione in corso
-        private Button _cancelButton;
-        private readonly ToolStripProgressBar _progress;
-        private readonly ToolTip _tips = new ToolTip { AutoPopDelay = 15000 };
-
-        private TextBox _repoUrl;
-        private TextBox _localFolder;
+        private CancellationTokenSource _actionCancel;
 
         // Server di sviluppo (npm run dev): attivo finché _previewCancel non è null
         private CancellationTokenSource _previewCancel;
-        private Button _previewButton;
-        private Button _stopButton;
-        private LinkLabel _previewLink;
         private Task _previewWatch;
-
-        private CheckBox _pullBeforeBuild;
-        private CheckBox _autoDeploy;
-
-        private TabControl _tabs;
-        private TabPage _ftpPage;
-        private TextBox _ftpHost;
-        private TextBox _ftpPort;
-        private TextBox _ftpUser;
-        private TextBox _ftpPassword; // mai salvata su disco
-        private TextBox _ftpRemoteDir;
-        private ComboBox _ftpEncryption;
-        private CheckBox _ftpAcceptAnyCertificate;
-        private CheckBox _deleteObsolete;
 
         private static readonly string[] EncryptionValues = { FtpTarget.EncryptionAuto, FtpTarget.EncryptionRequired, FtpTarget.EncryptionNone };
         private static readonly string[] EncryptionLabels = { "FTPS se disponibile (consigliato)", "Solo FTPS (TLS esplicito)", "FTP non cifrato" };
 
+        private enum StatusKind { Ready, Busy, Success, Error }
+
         public MainForm()
         {
-            SuspendLayout();
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
-            Font = new Font("Segoe UI", 9F);
-            Text = "WebDeployer";
-            StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(960, 640);
-            MinimumSize = new Size(820, 560);
-
-            _log = new TextBox
-            {
-                Dock = DockStyle.Fill,
-                Multiline = true,
-                ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical,
-                Font = new Font("Consolas", 9F),
-                BackColor = Color.FromArgb(24, 24, 24),
-                ForeColor = Color.Gainsboro,
-            };
-
             _settings = Settings.Load(AppPaths.SettingsFile, out _settingsError);
+            BuildUi();
 
-            var tabs = new TabControl { Dock = DockStyle.Fill };
-            _tabs = tabs;
-            tabs.TabPages.Add(BuildProjectTab());
-            tabs.TabPages.Add(_ftpPage = BuildFtpTab());
-
-            // La parte alta resta della sua altezza, il log prende lo spazio quando la finestra si ingrandisce
-            var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, FixedPanel = FixedPanel.Panel1 };
-            split.Panel1.Controls.Add(tabs);
-            split.Panel1.Controls.Add(BuildLogoPanel());
-            split.Panel2.Controls.Add(BuildLogPanel());
-
-            _status = new ToolStripStatusLabel("Pronto") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
-            _tools = new ToolStripStatusLabel("Controllo Git e Node...");
-            _progress = new ToolStripProgressBar { Visible = false, Size = new Size(180, 16) };
-            var statusStrip = new StatusStrip();
-            statusStrip.Items.Add(_status);
-            statusStrip.Items.Add(_progress);
-            statusStrip.Items.Add(_tools);
-
-            Controls.Add(split);
-            Controls.Add(statusStrip);
             Load += async (s, e) =>
             {
-                FitTopPanel(split, tabs);
+                FitToScreen();
                 await CheckToolsAsync();
             };
             FormClosing += (s, e) =>
@@ -114,148 +52,18 @@ namespace WebDeployer
                 SaveSettings();
             };
 
-            ResumeLayout(false);
-            PerformLayout();
-
-            Log("WebDeployer avviato.");
             if (_settingsError != null)
                 Log($"settings.json illeggibile ({_settingsError}): copiato in settings.json.bak, uso le impostazioni di default.");
         }
 
-        private TabPage BuildProjectTab()
-        {
-            var page = new TabPage("Progetto") { Padding = new Padding(10) };
-
-            var grid = NewFormGrid();
-
-            _repoUrl = new TextBox { Dock = DockStyle.Fill, Text = _settings.RepoUrl };
-            _repoUrl.TextChanged += (s, e) => _localFolder.Text = AppPaths.LocalFolderFor(_repoUrl.Text);
-            _repoUrl.Leave += (s, e) => SaveSettings();
-            var clone = ActionButton("Clona", () => RunActionAsync("Clone", CloneAsync));
-            AddRow(grid, "Repository Git:", _repoUrl, clone);
-            AddHint(grid, "Incolla l'URL del repository GitHub del sito (per esempio quello collegato a Lovable).");
-
-            _localFolder = new TextBox { Dock = DockStyle.Fill, ReadOnly = true, Text = AppPaths.LocalFolderFor(_settings.RepoUrl) };
-            var openFolder = new Button { Text = "Apri", AutoSize = true };
-            openFolder.Click += (s, e) => OpenFolder(_localFolder.Text, "La cartella non esiste ancora: clona prima il repository.");
-            AddRow(grid, "Cartella locale:", _localFolder, openFolder);
-
-            var pull = ActionButton("Aggiorna (git pull)", () => RunActionAsync("Aggiornamento", async () => { await PullAsync(); }));
-            AddRow(grid, "", Flow(pull), null);
-
-            _previewButton = ActionButton("Preview", () => RunActionAsync("Avvio preview", StartPreviewAsync));
-            _stopButton = new Button { Text = "Stop", AutoSize = true, Enabled = false };
-            _stopButton.Click += (s, e) => _previewCancel?.Cancel();
-            _previewLink = new LinkLabel { AutoSize = true, Margin = new Padding(12, 8, 3, 3) };
-            _previewLink.LinkClicked += (s, e) => OpenBrowser(_previewLink.Text);
-
-            var build = ActionButton("Build", () => RunActionAsync("Build", BuildThenDeployAsync));
-            var upload = ActionButton("Carica via FTP", () => RunActionAsync("Caricamento FTP", async () => { await DeployAsync(); }));
-            var openBuild = new Button { Text = "Apri cartella build", AutoSize = true, Margin = new Padding(12, 3, 3, 3) };
-            openBuild.Click += (s, e) => OpenFolder(OutputFolder(_localFolder.Text), "La build non esiste ancora: premi Build.");
-            _pullBeforeBuild = new CheckBox
-            {
-                Text = "git pull prima del build",
-                AutoSize = true,
-                Checked = _settings.PullBeforeBuild,
-                Margin = new Padding(3, 7, 3, 3),
-            };
-            _pullBeforeBuild.CheckedChanged += (s, e) => SaveSettings();
-            _autoDeploy = new CheckBox
-            {
-                Text = "Auto deploy: dopo una build riuscita carica via FTP",
-                AutoSize = true,
-                Checked = _settings.AutoDeploy,
-                Margin = new Padding(12, 7, 3, 3),
-            };
-            _autoDeploy.CheckedChanged += (s, e) => SaveSettings();
-            var production = Flow(build, upload, openBuild, _pullBeforeBuild, _autoDeploy);
-            production.SetFlowBreak(openBuild, true);
-
-            var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1 };
-            stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            stack.Controls.Add(grid);
-            stack.Controls.Add(Section("Sviluppo (npm run dev)", Flow(_previewButton, _stopButton, _previewLink)));
-            stack.Controls.Add(Section("Produzione (npm run build)", production));
-
-            // Righe alte quanto il contenuto, più una riga vuota finale che prende lo spazio avanzato
-            foreach (Control _ in stack.Controls) stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            stack.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            stack.RowCount = stack.RowStyles.Count;
-
-            page.Controls.Add(stack);
-            return page;
-        }
-
-        private static GroupBox Section(string title, Control content)
-        {
-            var box = new GroupBox
-            {
-                Text = title,
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(8, 4, 8, 6),
-                Margin = new Padding(3, 10, 3, 3),
-            };
-            box.Controls.Add(content);
-            return box;
-        }
-
-        /// <summary>Griglia etichetta | campo | pulsante.</summary>
-        private static TableLayoutPanel NewFormGrid()
-        {
-            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3 };
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            return grid;
-        }
-
-        /// <summary>Riga di aiuto in grigio sotto il campo precedente.</summary>
-        private static void AddHint(TableLayoutPanel grid, string text)
-        {
-            grid.Controls.Add(new Label
-            {
-                Text = text,
-                AutoSize = true,
-                ForeColor = SystemColors.GrayText,
-                Margin = new Padding(3, 0, 3, 8),
-            }, 1, grid.RowCount++);
-        }
-
-        private static void AddRow(TableLayoutPanel grid, string label, Control field, Control button)
-        {
-            var row = grid.RowCount++;
-            grid.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 6, 3) }, 0, row);
-            grid.Controls.Add(field, 1, row);
-            if (button != null) grid.Controls.Add(button, 2, row);
-        }
-
-        private static FlowLayoutPanel Flow(params Control[] controls)
-        {
-            var flow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Dock = DockStyle.Fill, Margin = Padding.Empty };
-            flow.Controls.AddRange(controls);
-            return flow;
-        }
-
-        /// <summary>Pulsante che lancia un'operazione e viene disattivato mentre un'altra è in corso.</summary>
-        private Button ActionButton(string text, Func<Task> onClick)
-        {
-            var button = new Button { Text = text, AutoSize = true };
-            button.Click += async (s, e) => await onClick();
-            _actionButtons.Add(button);
-            return button;
-        }
-
         /// <summary>Esegue un'operazione alla volta: disattiva i pulsanti e scrive nel log eventuali errori.</summary>
-        private async Task RunActionAsync(string name, Func<Task> action)
+        private async Task RunActionAsync(string name, Func<Task<bool>> action)
         {
             if (_busy) return;
             _busy = true;
             _actionCancel = new CancellationTokenSource();
             UpdateButtons();
-            SetStatus(name + " in corso...");
+            SetStatus(name + " in corso…", StatusKind.Busy);
             try
             {
                 await action();
@@ -300,22 +108,22 @@ namespace WebDeployer
             var npm = Tools.NpmVersionAsync();
             await Task.WhenAll(git, node, npm);
 
-            _tools.Text = $"Git {git.Result ?? "MANCANTE"}  ·  Node {node.Result ?? "MANCANTE"}  ·  npm {npm.Result ?? "MANCANTE"}";
+            SetBadge(_gitBadge, "Git", git.Result);
+            SetBadge(_nodeBadge, "Node", node.Result);
+            SetBadge(_npmBadge, "npm", npm.Result);
             if (git.Result == null)
                 Log("Git non trovato. Installalo da https://git-scm.com/download/win e riavvia WebDeployer.");
             if (node.Result == null || npm.Result == null)
                 Log("Node.js/npm non trovato. Installalo da https://nodejs.org/ e riavvia WebDeployer.");
-            if (git.Result == null || node.Result == null || npm.Result == null)
-                _tools.ForeColor = Color.Firebrick;
         }
 
-        private async Task CloneAsync()
+        private async Task<bool> CloneAsync()
         {
             var url = _repoUrl.Text.Trim();
             if (!Git.IsValidUrl(url))
             {
                 Log("Inserisci un URL valido del repository, per esempio https://github.com/utente/sito.git");
-                return;
+                return false;
             }
             SaveSettings();
             var folder = AppPaths.LocalFolderFor(url);
@@ -326,21 +134,21 @@ namespace WebDeployer
                 if (!Git.SameRemote(remote, url))
                 {
                     Log($"La cartella {folder} contiene un altro repository ({remote}). Rinominala o cancellala e riprova.");
-                    return;
+                    return false;
                 }
                 Log("Repository già clonato: lo aggiorno.");
-                await PullAsync();
-                return;
+                return await PullAsync();
             }
             if (Directory.Exists(folder) && Directory.EnumerateFileSystemEntries(folder).Any())
             {
                 Log($"La cartella {folder} esiste già e non è un repository Git: rinominala o cancellala e riprova.");
-                return;
+                return false;
             }
 
             Log($"git clone {url}");
             var code = await Git.CloneAsync(url, folder, LogTool, ActionToken);
             Log(code == 0 ? $"Clone completato in {folder}" : $"Clone fallito (codice {code}).");
+            return code == 0;
         }
 
         /// <summary>Esegue git pull nella cartella del progetto. Restituisce true se è andato a buon fine.</summary>
@@ -404,13 +212,14 @@ namespace WebDeployer
             return true;
         }
 
-        private async Task StartPreviewAsync()
+        private async Task<bool> StartPreviewAsync()
         {
             var folder = _localFolder.Text;
-            if (!ProjectReady(folder) || !await EnsureInstalledAsync(folder)) return;
+            if (!ProjectReady(folder) || !await EnsureInstalledAsync(folder)) return false;
 
             var cancel = new CancellationTokenSource();
             _previewCancel = cancel;
+            SetPreviewState("In avvio…", Theme.Accent);
             UpdateButtons();
 
             Log("npm run dev");
@@ -424,12 +233,41 @@ namespace WebDeployer
             }, cancel.Token);
 
             _previewWatch = WatchPreviewAsync(server, cancel);
+            return true;
         }
 
         private async Task StopPreviewAsync()
         {
             _previewCancel?.Cancel();
             if (_previewWatch != null) await _previewWatch;
+        }
+
+        private void OnPreviewReady(string url)
+        {
+            if (_previewCancel == null) return; // fermata nel frattempo
+            _previewLink.Text = url;
+            SetPreviewState("In esecuzione", Theme.Success);
+            Log("Preview pronta: " + url);
+            OpenBrowser(url);
+        }
+
+        /// <summary>Aspetta la chiusura del server di sviluppo e riattiva i pulsanti.</summary>
+        private async Task WatchPreviewAsync(Task<int> server, CancellationTokenSource cancel)
+        {
+            int code;
+            try { code = await server; }
+            catch (OperationCanceledException) { code = -1; } // fermata con Stop
+            catch (Exception ex) { Log("ERRORE preview: " + ex.Message); code = -1; }
+
+            var stoppedByUser = cancel.IsCancellationRequested;
+            if (_previewCancel == cancel) _previewCancel = null;
+            cancel.Dispose();
+            if (IsDisposed) return;
+
+            Log(stoppedByUser ? "Preview fermata." : $"Il server di preview si è chiuso (codice {code}).");
+            _previewLink.Text = "";
+            SetPreviewState("Ferma", Theme.Idle);
+            UpdateButtons();
         }
 
         /// <summary>git pull (se richiesto), dipendenze, npm run build. Restituisce true se la build è pronta.</summary>
@@ -473,30 +311,99 @@ namespace WebDeployer
             return true;
         }
 
-        private void OnPreviewReady(string url)
+        /// <summary>Pulsante "Build e carica": build e, se riesce, caricamento via FTP.</summary>
+        private async Task<bool> BuildAndDeployAsync() => await BuildAsync() && await DeployAsync();
+
+        /// <summary>Legge i dati FTP dalla scheda; chiede la password se manca. Null se i dati non bastano.</summary>
+        private FtpTarget ReadFtpTarget()
         {
-            if (_previewCancel == null) return; // fermata nel frattempo
-            _previewLink.Text = url;
-            Log("Preview pronta: " + url);
-            OpenBrowser(url);
+            SaveSettings();
+            var host = FtpTarget.CleanHost(_ftpHost.Text);
+            var user = _ftpUser.Text.Trim();
+            if (host.Length == 0 || user.Length == 0)
+            {
+                Log("Compila server e utente nella scheda FTP.");
+                ShowPage(ftp: true);
+                return null;
+            }
+
+            if (_ftpPassword.Text.Length == 0)
+            {
+                var password = PasswordPrompt.Ask(this, $"Password FTP per {user}@{host}:");
+                if (password == null)
+                {
+                    Log("Operazione annullata: password FTP non inserita.");
+                    return null;
+                }
+                _ftpPassword.Text = password;
+            }
+
+            return new FtpTarget
+            {
+                Host = host,
+                Port = _settings.FtpPort,
+                User = user,
+                Password = _ftpPassword.Text,
+                RemoteDir = FtpTarget.CleanRemoteDir(_ftpRemoteDir.Text),
+                Encryption = _settings.FtpEncryption,
+                AcceptAnyCertificate = _ftpAcceptAnyCertificate.Checked,
+            };
         }
 
-        /// <summary>Aspetta la chiusura del server di sviluppo e riattiva i pulsanti.</summary>
-        private async Task WatchPreviewAsync(Task<int> server, CancellationTokenSource cancel)
+        private async Task<bool> TestFtpAsync()
         {
-            int code;
-            try { code = await server; }
-            catch (OperationCanceledException) { code = -1; } // fermata con Stop
-            catch (Exception ex) { Log("ERRORE preview: " + ex.Message); code = -1; }
+            var target = ReadFtpTarget();
+            if (target == null) return false;
 
-            var stoppedByUser = cancel.IsCancellationRequested;
-            if (_previewCancel == cancel) _previewCancel = null;
-            cancel.Dispose();
-            if (IsDisposed) return;
+            Log($"Test connessione FTP: {target}");
+            try
+            {
+                await FtpDeployer.TestAsync(target, Log, ActionToken);
+                Log("Connessione FTP riuscita.");
+                return true;
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                Log("Connessione FTP non riuscita: " + FtpDeployer.Explain(ex));
+                return false;
+            }
+        }
 
-            Log(stoppedByUser ? "Preview fermata." : $"Il server di preview si è chiuso (codice {code}).");
-            _previewLink.Text = "";
-            UpdateButtons();
+        /// <summary>
+        /// Carica la build sul server FTP: solo i file cambiati, oppure tutti con uploadAll.
+        /// Restituisce true se il caricamento è completo.
+        /// </summary>
+        private async Task<bool> DeployAsync(bool uploadAll = false)
+        {
+            SetStatus("Caricamento FTP in corso…", StatusKind.Busy);
+            var output = OutputFolder(_localFolder.Text);
+            if (!File.Exists(Path.Combine(output, "index.html")))
+            {
+                Log("Non c'è ancora una build da caricare: premi Build.");
+                return false;
+            }
+            var target = ReadFtpTarget();
+            if (target == null) return false;
+
+            Log($"Caricamento via FTP di {output} su {target}" + (uploadAll ? " (tutti i file)" : ""));
+            _progress.Value = 0;
+            _progress.Visible = true;
+            var progress = new Progress<double>(p => _progress.Value = (int)(p * 100));
+            try
+            {
+                var timer = Stopwatch.StartNew();
+                // Elenco dei file caricati, accanto alla cartella del progetto (es. projects\sito.deploy.json)
+                var manifest = _localFolder.Text.TrimEnd('\\') + ".deploy.json";
+                var result = await FtpDeployer.UploadAsync(target, output, manifest, uploadAll, _deleteObsolete.Checked,
+                    Log, progress, ActionToken);
+                Log($"Caricamento completato in {timer.Elapsed.TotalSeconds:0.0} s: {result}.");
+                return true;
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException) && !ActionToken.IsCancellationRequested)
+            {
+                Log("Caricamento non riuscito: " + FtpDeployer.Explain(ex));
+                return false;
+            }
         }
 
         private void OpenBrowser(string url)
@@ -536,7 +443,6 @@ namespace WebDeployer
         {
             _settings.RepoUrl = _repoUrl.Text.Trim();
             _settings.PullBeforeBuild = _pullBeforeBuild.Checked;
-            _settings.AutoDeploy = _autoDeploy.Checked;
             _settings.FtpHost = FtpTarget.CleanHost(_ftpHost.Text);
             _settings.FtpPort = int.TryParse(_ftpPort.Text.Trim(), out var port) && port > 0 && port < 65536 ? port : 21;
             _settings.FtpUser = _ftpUser.Text.Trim();
@@ -546,233 +452,6 @@ namespace WebDeployer
             _settings.DeleteObsoleteFiles = _deleteObsolete.Checked;
             try { _settings.Save(AppPaths.SettingsFile); }
             catch (Exception ex) { Log("Impossibile salvare le impostazioni: " + ex.Message); }
-        }
-
-        /// <summary>Alza la parte superiore quanto basta a mostrare per intero la scheda più alta.</summary>
-        private void FitTopPanel(SplitContainer split, TabControl tabs)
-        {
-            var page = tabs.TabPages[0];
-            var width = tabs.DisplayRectangle.Width - page.Padding.Horizontal;
-            var content = tabs.TabPages.Cast<TabPage>()
-                .SelectMany(p => p.Controls.Cast<Control>())
-                .Max(c => c.GetPreferredSize(new Size(width, 0)).Height);
-            var chrome = tabs.Height - tabs.DisplayRectangle.Height + page.Padding.Vertical;
-            split.SplitterDistance = Math.Max(split.Panel1MinSize, Math.Min(content + chrome + 4, split.Height - 160));
-        }
-
-        private static Control BuildLogoPanel()
-        {
-            var logo = new PictureBox
-            {
-                Image = LoadLogo(),
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Dock = DockStyle.Top,
-                Height = 120,
-            };
-            var panel = new Panel { Dock = DockStyle.Right, Width = 212, Padding = new Padding(6, 24, 6, 0) };
-            panel.Controls.Add(logo);
-            return panel;
-        }
-
-        private static Image LoadLogo()
-        {
-            // Lo stream resta aperto: GDI+ lo usa per leggere i fotogrammi della GIF animata
-            var stream = typeof(MainForm).Assembly.GetManifestResourceStream("WebDeployer.logo.gif");
-            return stream == null ? null : Image.FromStream(stream);
-        }
-
-        private TabPage BuildFtpTab()
-        {
-            var page = new TabPage("FTP") { Padding = new Padding(10) };
-            var grid = NewFormGrid();
-            grid.Dock = DockStyle.Top;
-
-            // Server e porta sulla stessa riga
-            _ftpHost = new TextBox { Dock = DockStyle.Fill, Text = _settings.FtpHost };
-            _tips.SetToolTip(_ftpHost, "L'indirizzo FTP indicato dal provider, per esempio ftp.miosito.it");
-            _ftpPort = new TextBox { Width = 60, Text = _settings.FtpPort.ToString() };
-            var hostRow = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3, Margin = Padding.Empty };
-            hostRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            hostRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            hostRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            hostRow.Controls.Add(_ftpHost, 0, 0);
-            hostRow.Controls.Add(new Label { Text = "Porta:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(12, 6, 3, 3) }, 1, 0);
-            hostRow.Controls.Add(_ftpPort, 2, 0);
-            AddRow(grid, "Server:", hostRow, null);
-
-            _ftpUser = new TextBox { Dock = DockStyle.Fill, Text = _settings.FtpUser };
-            AddRow(grid, "Utente:", _ftpUser, null);
-
-            _ftpPassword = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
-            AddRow(grid, "Password:", _ftpPassword, null);
-            AddHint(grid, "La password non viene salvata: resta in memoria finché WebDeployer è aperto.");
-
-            _ftpRemoteDir = new TextBox { Dock = DockStyle.Fill, Text = _settings.FtpRemoteDir };
-            AddRow(grid, "Cartella remota:", _ftpRemoteDir, null);
-            AddHint(grid, "La cartella del sito sul server, per esempio /public_html, /htdocs o /www.miosito.it");
-
-            _ftpEncryption = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260 };
-            _ftpEncryption.Items.AddRange(EncryptionLabels);
-            _ftpEncryption.SelectedIndex = Math.Max(0, Array.IndexOf(EncryptionValues, _settings.FtpEncryption));
-            AddRow(grid, "Cifratura:", _ftpEncryption, null);
-
-            _ftpAcceptAnyCertificate = new CheckBox
-            {
-                Text = "Accetta certificati non validi (es. intestati al provider invece che al tuo dominio)",
-                AutoSize = true,
-                Checked = _settings.FtpAcceptAnyCertificate,
-            };
-            AddRow(grid, "", _ftpAcceptAnyCertificate, null);
-
-            _deleteObsolete = new CheckBox
-            {
-                Text = "Elimina dal server i file delle build precedenti che non servono più",
-                AutoSize = true,
-                Checked = _settings.DeleteObsoleteFiles,
-            };
-            _deleteObsolete.CheckedChanged += (s, e) => SaveSettings();
-            AddRow(grid, "", _deleteObsolete, null);
-            AddHint(grid, "Solo file caricati da WebDeployer: gli altri file presenti sul server non vengono mai toccati.");
-
-            var test = ActionButton("Test connessione", () => RunActionAsync("Test connessione", TestFtpAsync));
-            var uploadAll = ActionButton("Ricarica tutti i file", () => RunActionAsync("Caricamento FTP", async () => { await DeployAsync(uploadAll: true); }));
-            _tips.SetToolTip(uploadAll, "\"Carica via FTP\" invia solo i file cambiati dall'ultimo caricamento.\n" +
-                                        "Questo pulsante li ricarica tutti: utile se il server è stato modificato a mano.");
-            AddRow(grid, "", Flow(test, uploadAll), null);
-
-            foreach (var box in new Control[] { _ftpHost, _ftpPort, _ftpUser, _ftpRemoteDir, _ftpEncryption, _ftpAcceptAnyCertificate })
-                box.Leave += (s, e) => SaveSettings();
-
-            page.Controls.Add(grid);
-            return page;
-        }
-
-        /// <summary>Legge i dati FTP dalla scheda; chiede la password se manca. Null se i dati non bastano.</summary>
-        private FtpTarget ReadFtpTarget()
-        {
-            SaveSettings();
-            var host = FtpTarget.CleanHost(_ftpHost.Text);
-            var user = _ftpUser.Text.Trim();
-            if (host.Length == 0 || user.Length == 0)
-            {
-                Log("Compila server e utente nella scheda FTP.");
-                _tabs.SelectedTab = _ftpPage;
-                return null;
-            }
-
-            if (_ftpPassword.Text.Length == 0)
-            {
-                var password = PasswordPrompt.Ask(this, $"Password FTP per {user}@{host}:");
-                if (password == null)
-                {
-                    Log("Operazione annullata: password FTP non inserita.");
-                    return null;
-                }
-                _ftpPassword.Text = password;
-            }
-
-            return new FtpTarget
-            {
-                Host = host,
-                Port = _settings.FtpPort,
-                User = user,
-                Password = _ftpPassword.Text,
-                RemoteDir = FtpTarget.CleanRemoteDir(_ftpRemoteDir.Text),
-                Encryption = _settings.FtpEncryption,
-                AcceptAnyCertificate = _ftpAcceptAnyCertificate.Checked,
-            };
-        }
-
-        private async Task TestFtpAsync()
-        {
-            var target = ReadFtpTarget();
-            if (target == null) return;
-
-            Log($"Test connessione FTP: {target}");
-            try
-            {
-                await FtpDeployer.TestAsync(target, Log, ActionToken);
-                Log("Connessione FTP riuscita.");
-            }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
-            {
-                Log("Connessione FTP non riuscita: " + FtpDeployer.Explain(ex));
-            }
-        }
-
-        /// <summary>Pulsante Build: build e, se è attivo l'auto deploy, caricamento via FTP.</summary>
-        private async Task BuildThenDeployAsync()
-        {
-            if (!await BuildAsync()) return;
-            if (_autoDeploy.Checked)
-            {
-                Log("Auto deploy: carico la build via FTP.");
-                await DeployAsync();
-            }
-        }
-
-        /// <summary>
-        /// Carica la build sul server FTP: solo i file cambiati, oppure tutti con uploadAll.
-        /// Restituisce true se il caricamento è completo.
-        /// </summary>
-        private async Task<bool> DeployAsync(bool uploadAll = false)
-        {
-            SetStatus("Caricamento FTP in corso...");
-            var output = OutputFolder(_localFolder.Text);
-            if (!File.Exists(Path.Combine(output, "index.html")))
-            {
-                Log("Non c'è ancora una build da caricare: premi Build.");
-                return false;
-            }
-            var target = ReadFtpTarget();
-            if (target == null) return false;
-
-            Log($"Caricamento via FTP di {output} su {target}" + (uploadAll ? " (tutti i file)" : ""));
-            _progress.Value = 0;
-            _progress.Visible = true;
-            var progress = new Progress<double>(p => _progress.Value = Math.Max(0, Math.Min(100, (int)(p * 100))));
-            try
-            {
-                var timer = Stopwatch.StartNew();
-                // Elenco dei file caricati, accanto alla cartella del progetto (es. projects\sito.deploy.json)
-                var manifest = _localFolder.Text.TrimEnd('\\') + ".deploy.json";
-                var result = await FtpDeployer.UploadAsync(target, output, manifest, uploadAll, _deleteObsolete.Checked,
-                    Log, progress, ActionToken);
-                Log($"Caricamento completato in {timer.Elapsed.TotalSeconds:0.0} s: {result}.");
-                return true;
-            }
-            catch (Exception ex) when (!(ex is OperationCanceledException) && !ActionToken.IsCancellationRequested)
-            {
-                Log("Caricamento non riuscito: " + FtpDeployer.Explain(ex));
-                return false;
-            }
-        }
-
-        private Control BuildLogPanel()
-        {
-            var header = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false };
-            header.Controls.Add(new Label
-            {
-                Text = "Log",
-                AutoSize = true,
-                Font = new Font(Font, FontStyle.Bold),
-                Margin = new Padding(0, 7, 12, 0),
-            });
-            var clear = new Button { Text = "Pulisci", AutoSize = true };
-            clear.Click += (s, e) => _log.Clear();
-            header.Controls.Add(clear);
-            _cancelButton = new Button { Text = "Annulla operazione", AutoSize = true, Enabled = false };
-            _cancelButton.Click += (s, e) =>
-            {
-                Log("Annullamento in corso...");
-                _actionCancel?.Cancel();
-            };
-            header.Controls.Add(_cancelButton);
-
-            var panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6, 0, 6, 6) };
-            panel.Controls.Add(_log);
-            panel.Controls.Add(header);
-            return panel;
         }
 
         /// <summary>Aggiunge una riga al log. Si può chiamare da qualsiasi thread.</summary>
@@ -786,6 +465,7 @@ namespace WebDeployer
                 return;
             }
 
+            _logEmpty.Visible = false;
             if (_log.TextLength > MaxLogChars)
                 _log.Text = _log.Text.Substring(_log.TextLength - MaxLogChars / 2);
             _log.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
@@ -797,9 +477,39 @@ namespace WebDeployer
             if (!string.IsNullOrWhiteSpace(line)) Log("    " + line);
         }
 
-        private void SetStatus(string text)
+        private void ClearLog()
         {
-            _status.Text = text;
+            _log.Clear();
+            _logEmpty.Visible = true;
+        }
+
+        private void SetStatus(string text, StatusKind kind = StatusKind.Ready)
+        {
+            _footerStatus.Text = text;
+            _footerStatus.DotColor = kind == StatusKind.Busy ? Theme.Accent : kind == StatusKind.Error ? Theme.Danger : Theme.Success;
+        }
+
+        private void SetPreviewState(string text, Color dot)
+        {
+            _previewState.Text = text;
+            _previewState.DotColor = dot;
+        }
+
+        private static void SetBadge(Pill badge, string name, string version)
+        {
+            badge.Text = version == null ? name + " mancante" : $"{name} {version}";
+            badge.Fill = version == null ? Theme.DangerSoft : Theme.SuccessSoft;
+            badge.ForeColor = version == null ? Theme.DangerText : Theme.SuccessText;
+            badge.Invalidate();
+        }
+
+        /// <summary>Se la finestra è più grande dello schermo (es. zoom al 150%) la riduce e la centra.</summary>
+        private void FitToScreen()
+        {
+            var area = Screen.FromControl(this).WorkingArea;
+            if (Width <= area.Width && Height <= area.Height) return;
+            Size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
+            Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
         }
     }
 }
