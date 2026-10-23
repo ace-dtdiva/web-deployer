@@ -23,6 +23,7 @@ namespace WebDeployer.Core
         [DataMember(Order = 7)] public string FtpRemoteDir { get; set; }
         [DataMember(Order = 8)] public string FtpEncryption { get; set; }
         [DataMember(Order = 9)] public bool FtpAcceptAnyCertificate { get; set; }
+        [DataMember(Order = 10)] public bool AutoDeploy { get; set; }
 
         public Settings() => SetDefaults();
 
@@ -41,6 +42,7 @@ namespace WebDeployer.Core
             FtpRemoteDir = "/";
             FtpEncryption = FtpTarget.EncryptionAuto;
             FtpAcceptAnyCertificate = false;
+            AutoDeploy = false;
         }
 
         /// <summary>Carica le impostazioni; se il file è illeggibile ne fa una copia .bak e riparte dai default.</summary>

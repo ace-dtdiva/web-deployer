@@ -39,6 +39,7 @@ namespace WebDeployer
         private Task _previewWatch;
 
         private CheckBox _pullBeforeBuild;
+        private CheckBox _autoDeploy;
 
         private TabControl _tabs;
         private TabPage _ftpPage;
@@ -146,7 +147,7 @@ namespace WebDeployer
             _previewLink = new LinkLabel { AutoSize = true, Margin = new Padding(12, 8, 3, 3) };
             _previewLink.LinkClicked += (s, e) => OpenBrowser(_previewLink.Text);
 
-            var build = ActionButton("Build", () => RunActionAsync("Build", async () => { await BuildAsync(); }));
+            var build = ActionButton("Build", () => RunActionAsync("Build", BuildThenDeployAsync));
             var upload = ActionButton("Carica via FTP", () => RunActionAsync("Caricamento FTP", async () => { await DeployAsync(); }));
             var openBuild = new Button { Text = "Apri cartella build", AutoSize = true, Margin = new Padding(12, 3, 3, 3) };
             openBuild.Click += (s, e) => OpenFolder(OutputFolder(_localFolder.Text), "La build non esiste ancora: premi Build.");
@@ -158,7 +159,15 @@ namespace WebDeployer
                 Margin = new Padding(3, 7, 3, 3),
             };
             _pullBeforeBuild.CheckedChanged += (s, e) => SaveSettings();
-            var production = Flow(build, upload, openBuild, _pullBeforeBuild);
+            _autoDeploy = new CheckBox
+            {
+                Text = "Auto deploy: dopo una build riuscita carica via FTP",
+                AutoSize = true,
+                Checked = _settings.AutoDeploy,
+                Margin = new Padding(12, 7, 3, 3),
+            };
+            _autoDeploy.CheckedChanged += (s, e) => SaveSettings();
+            var production = Flow(build, upload, openBuild, _pullBeforeBuild, _autoDeploy);
             production.SetFlowBreak(openBuild, true);
 
             var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1 };
@@ -525,6 +534,7 @@ namespace WebDeployer
         {
             _settings.RepoUrl = _repoUrl.Text.Trim();
             _settings.PullBeforeBuild = _pullBeforeBuild.Checked;
+            _settings.AutoDeploy = _autoDeploy.Checked;
             _settings.FtpHost = FtpTarget.CleanHost(_ftpHost.Text);
             _settings.FtpPort = int.TryParse(_ftpPort.Text.Trim(), out var port) && port > 0 && port < 65536 ? port : 21;
             _settings.FtpUser = _ftpUser.Text.Trim();
@@ -668,9 +678,21 @@ namespace WebDeployer
             }
         }
 
+        /// <summary>Pulsante Build: build e, se è attivo l'auto deploy, caricamento via FTP.</summary>
+        private async Task BuildThenDeployAsync()
+        {
+            if (!await BuildAsync()) return;
+            if (_autoDeploy.Checked)
+            {
+                Log("Auto deploy: carico la build via FTP.");
+                await DeployAsync();
+            }
+        }
+
         /// <summary>Carica la build sul server FTP. Restituisce true se il caricamento è completo.</summary>
         private async Task<bool> DeployAsync()
         {
+            SetStatus("Caricamento FTP in corso...");
             var output = OutputFolder(_localFolder.Text);
             if (!File.Exists(Path.Combine(output, "index.html")))
             {
