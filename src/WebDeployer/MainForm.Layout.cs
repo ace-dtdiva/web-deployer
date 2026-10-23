@@ -234,7 +234,7 @@ namespace WebDeployer
             _localFolder = folder.Box;
             _localFolder.Text = AppPaths.LocalFolderFor(_settings.RepoUrl);
             var open = Say(new FlatButton("Apri", ButtonKind.Secondary, IconKind.Folder), "Apri", "Apri cartella");
-            open.Click += (s, e) => OpenFolder(_localFolder.Text, "La cartella non esiste ancora: clona prima il repository.");
+            open.Click += (s, e) => OpenFolder(_localFolder.Text, NotClonedMessage);
             var pull = ActionButton("", "", ButtonKind.Secondary, IconKind.Refresh, "Aggiornamento",
                 new FriendlyText("Sto scaricando le ultime modifiche…", "Hai l'ultima versione del sito.", "Non è stato possibile scaricare le modifiche."),
                 PullAsync);
@@ -286,7 +286,7 @@ namespace WebDeployer
             publish.Controls.Add(_pullBeforeBuild);
             var openBuild = Say(new FlatButton("Apri cartella build", ButtonKind.Link, IconKind.Folder) { Margin = new Padding(0, 8, 0, 0) },
                 "Apri cartella build", "Apri il sito costruito");
-            openBuild.Click += (s, e) => OpenFolder(OutputFolder(_localFolder.Text), "La build non esiste ancora: premi \"Solo build\".");
+            openBuild.Click += (s, e) => OpenFolder(OutputFolder(_localFolder.Text), NoBuildMessage);
             publish.Controls.Add(openBuild);
 
             return Stack(source, preview, publish);

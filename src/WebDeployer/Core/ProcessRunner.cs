@@ -17,8 +17,9 @@ namespace WebDeployer.Core
         /// Annullando il token si chiude l'intero albero di processi (es. cmd → npm → node)
         /// e viene lanciata OperationCanceledException.
         /// </summary>
+        /// <param name="killWithApp">Lega il processo (e i suoi figli) a WebDeployer: si chiude se l'app si chiude.</param>
         public static Task<int> RunAsync(string fileName, string arguments, string workingDir,
-            Action<string> onOutput, CancellationToken cancel = default)
+            Action<string> onOutput, CancellationToken cancel = default, bool killWithApp = false)
         {
             return Task.Run(() =>
             {
@@ -32,6 +33,7 @@ namespace WebDeployer.Core
                     p.ErrorDataReceived += forward;
 
                     p.Start();
+                    if (killWithApp) ChildProcessJob.Add(p);
                     // Nessun input: un programma che chiede qualcosa riceve "fine input" invece di restare bloccato
                     p.StandardInput.Close();
                     p.BeginOutputReadLine();

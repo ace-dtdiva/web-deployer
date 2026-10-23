@@ -30,8 +30,9 @@ namespace WebDeployer
         private Task _previewWatch;
         private PreviewState _preview = PreviewState.Stopped;
 
-        // Ultimo messaggio dell'app (non dei programmi esterni): in Anita friendly spiega cosa è andato storto
+        // Ultimo messaggio dell'app e ultima riga dei programmi esterni: in Anita friendly spiegano cosa è andato storto
         private string _lastMessage = "";
+        private string _lastToolLine = "";
 
         private static readonly string[] EncryptionValues = { FtpTarget.EncryptionAuto, FtpTarget.EncryptionRequired, FtpTarget.EncryptionNone };
         private static readonly string[] EncryptionLabels = { "FTPS se disponibile (consigliato)", "Solo FTPS (TLS esplicito)", "FTP non cifrato" };
@@ -71,6 +72,7 @@ namespace WebDeployer
             if (_busy) return;
             _busy = true;
             _actionCancel = new CancellationTokenSource();
+            _lastMessage = _lastToolLine = "";
             UpdateButtons();
             SetStatus(Friendly ? friendly.Busy : name + " in corso…", StatusKind.Busy);
 
@@ -107,8 +109,9 @@ namespace WebDeployer
             else
             {
                 SetStatus(friendly.Failed, StatusKind.Error);
+                var technical = _lastToolLine.Length > 0 ? "\n\nDettaglio tecnico (utile a chi ti aiuta): " + _lastToolLine : "";
                 MessageBox.Show(this,
-                    friendly.Failed + "\n\nCosa è successo: " + _lastMessage +
+                    friendly.Failed + "\n\nCosa è successo: " + _lastMessage + technical +
                     "\n\nSe non è chiaro, passa alla modalità Professional: nel log ci sono tutti i dettagli.",
                     "Anita's Website Deployer", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
@@ -143,14 +146,30 @@ namespace WebDeployer
                 Log("Git non trovato. Installalo da https://git-scm.com/download/win e riavvia WebDeployer.");
             if (node.Result == null || npm.Result == null)
                 Log("Node.js/npm non trovato. Installalo da https://nodejs.org/ e riavvia WebDeployer.");
+
+            // In Anita friendly il log non si vede: lo diciamo con una finestra
+            if (Friendly && (git.Result == null || node.Result == null || npm.Result == null))
+            {
+                SetStatus("Mancano dei programmi che servono a WebDeployer.", StatusKind.Error);
+                var missing = (git.Result == null ? "\n• Git: https://git-scm.com/download/win" : "") +
+                              (node.Result == null || npm.Result == null ? "\n• Node.js: https://nodejs.org/" : "");
+                MessageBox.Show(this,
+                    "Per funzionare, WebDeployer ha bisogno di questi programmi, che su questo PC non ci sono:" + missing +
+                    "\n\nDopo averli installati, riapri WebDeployer.",
+                    "Anita's Website Deployer", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
+
+        /// <summary>La frase giusta per la modalità corrente.</summary>
+        private string Words(string professional, string friendly) => Friendly ? friendly : professional;
 
         private async Task<bool> CloneAsync()
         {
             var url = _repoUrl.Text.Trim();
             if (!Git.IsValidUrl(url))
             {
-                Log("Inserisci un URL valido del repository, per esempio https://github.com/utente/sito.git");
+                Log(Words("Inserisci un URL valido del repository, per esempio https://github.com/utente/sito.git",
+                          "L'indirizzo non sembra giusto: deve essere come https://github.com/utente/sito"));
                 return false;
             }
             SaveSettings();
@@ -185,7 +204,7 @@ namespace WebDeployer
             var folder = _localFolder.Text;
             if (!Git.IsRepo(folder))
             {
-                Log("Il repository non è ancora clonato: premi Clona.");
+                Log(NotClonedMessage);
                 return false;
             }
             Log("git pull");
@@ -194,17 +213,24 @@ namespace WebDeployer
             return code == 0;
         }
 
+        private string NotClonedMessage => Words("Il repository non è ancora clonato: premi Clona.",
+                                                 "Il sito non è ancora sul PC: premi «Scarica il sito».");
+
+        private string NoBuildMessage => Words("La build non esiste ancora: premi «Solo build» o «Build e carica».",
+                                               "Il sito non è ancora stato costruito: premi «Costruisci il sito».");
+
         /// <summary>Controlla che il progetto sia clonato e sia un progetto Node.</summary>
         private bool ProjectReady(string folder)
         {
             if (!Git.IsRepo(folder))
             {
-                Log("Il repository non è ancora clonato: premi Clona.");
+                Log(NotClonedMessage);
                 return false;
             }
             if (!Npm.HasPackageJson(folder))
             {
-                Log("package.json non trovato: la cartella non sembra un progetto Node/Vite.");
+                Log(Words("package.json non trovato: la cartella non sembra un progetto Node/Vite.",
+                          "Questa cartella non sembra contenere un sito da costruire (manca package.json)."));
                 return false;
             }
             return true;
@@ -309,7 +335,9 @@ namespace WebDeployer
 
             if (_pullBeforeBuild.Checked && !await PullAsync())
             {
-                Log("Build annullata perché git pull non è riuscito (togli la spunta \"git pull prima del build\" per buildare comunque).");
+                Log(Words("Build annullata perché git pull non è riuscito (togli la spunta «Esegui git pull prima del build» per buildare comunque).",
+                          "Non è stato possibile scaricare le ultime modifiche, quindi il sito non è stato costruito. " +
+                          "Puoi togliere la spunta «Prima scarica le ultime modifiche da GitHub» e riprovare."));
                 return false;
             }
 
@@ -417,7 +445,7 @@ namespace WebDeployer
             var output = OutputFolder(_localFolder.Text);
             if (!File.Exists(Path.Combine(output, "index.html")))
             {
-                Log("Non c'è ancora una build da caricare: premi Build.");
+                Log(NoBuildMessage);
                 return false;
             }
             var target = ReadFtpTarget();
@@ -513,7 +541,9 @@ namespace WebDeployer
         /// <summary>Riga di output di un programma esterno: rientrata per distinguerla dai messaggi dell'app.</summary>
         private void LogTool(string line)
         {
-            if (!string.IsNullOrWhiteSpace(line)) Log("    " + line);
+            if (string.IsNullOrWhiteSpace(line)) return;
+            _lastToolLine = line.Trim(); // dal thread del processo: è solo un riferimento a una stringa
+            Log("    " + line);
         }
 
         private void ClearLog()

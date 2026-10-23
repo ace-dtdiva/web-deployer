@@ -34,9 +34,9 @@ namespace WebDeployer.Core
         public static void MarkInstalled(string folder) =>
             File.WriteAllText(Path.Combine(folder, "node_modules", InstallMarker), DateTime.Now.ToString("s"));
 
-        /// <summary>Esegue "npm &lt;args&gt;" nella cartella del progetto.</summary>
+        /// <summary>Esegue "npm &lt;args&gt;" nella cartella del progetto; npm e node si chiudono se si chiude WebDeployer.</summary>
         public static Task<int> RunAsync(string args, string folder, Action<string> onOutput, CancellationToken cancel = default) =>
-            ProcessRunner.RunAsync("cmd.exe", "/d /c npm " + args, folder, onOutput, cancel);
+            ProcessRunner.RunAsync("cmd.exe", "/d /c npm " + args, folder, onOutput, cancel, killWithApp: true);
 
         /// <summary>L'indirizzo locale del server di sviluppo, se la riga lo contiene.</summary>
         public static string FindLocalUrl(string line)
