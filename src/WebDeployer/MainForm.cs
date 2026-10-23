@@ -24,6 +24,9 @@ namespace WebDeployer
         // Pulsanti disattivati mentre è in corso un'operazione
         private readonly List<Control> _actionButtons = new List<Control>();
         private bool _busy;
+        private CancellationTokenSource _actionCancel; // annulla l'operazione in corso
+        private Button _cancelButton;
+        private readonly ToolStripProgressBar _progress;
 
         private TextBox _repoUrl;
         private TextBox _localFolder;
@@ -87,8 +90,10 @@ namespace WebDeployer
 
             _status = new ToolStripStatusLabel("Pronto") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
             _tools = new ToolStripStatusLabel("Controllo Git e Node...");
+            _progress = new ToolStripProgressBar { Visible = false, Size = new Size(180, 16) };
             var statusStrip = new StatusStrip();
             statusStrip.Items.Add(_status);
+            statusStrip.Items.Add(_progress);
             statusStrip.Items.Add(_tools);
 
             Controls.Add(split);
@@ -100,7 +105,9 @@ namespace WebDeployer
             };
             FormClosing += (s, e) =>
             {
-                _previewCancel?.Cancel(); // non lasciare node.exe acceso dopo la chiusura
+                // non lasciare node.exe, git o trasferimenti FTP attivi dopo la chiusura
+                _previewCancel?.Cancel();
+                _actionCancel?.Cancel();
                 SaveSettings();
             };
 
@@ -140,22 +147,25 @@ namespace WebDeployer
             _previewLink.LinkClicked += (s, e) => OpenBrowser(_previewLink.Text);
 
             var build = ActionButton("Build", () => RunActionAsync("Build", async () => { await BuildAsync(); }));
+            var upload = ActionButton("Carica via FTP", () => RunActionAsync("Caricamento FTP", async () => { await DeployAsync(); }));
+            var openBuild = new Button { Text = "Apri cartella build", AutoSize = true, Margin = new Padding(12, 3, 3, 3) };
+            openBuild.Click += (s, e) => OpenFolder(OutputFolder(_localFolder.Text), "La build non esiste ancora: premi Build.");
             _pullBeforeBuild = new CheckBox
             {
                 Text = "git pull prima del build",
                 AutoSize = true,
                 Checked = _settings.PullBeforeBuild,
-                Margin = new Padding(12, 7, 3, 3),
+                Margin = new Padding(3, 7, 3, 3),
             };
             _pullBeforeBuild.CheckedChanged += (s, e) => SaveSettings();
-            var openBuild = new Button { Text = "Apri cartella build", AutoSize = true, Margin = new Padding(12, 3, 3, 3) };
-            openBuild.Click += (s, e) => OpenFolder(OutputFolder(_localFolder.Text), "La build non esiste ancora: premi Build.");
+            var production = Flow(build, upload, openBuild, _pullBeforeBuild);
+            production.SetFlowBreak(openBuild, true);
 
             var stack = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1 };
             stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             stack.Controls.Add(grid);
-            stack.Controls.Add(Section("Sviluppo (npm run dev)", _previewButton, _stopButton, _previewLink));
-            stack.Controls.Add(Section("Produzione (npm run build)", build, _pullBeforeBuild, openBuild));
+            stack.Controls.Add(Section("Sviluppo (npm run dev)", Flow(_previewButton, _stopButton, _previewLink)));
+            stack.Controls.Add(Section("Produzione (npm run build)", production));
 
             // Righe alte quanto il contenuto, più una riga vuota finale che prende lo spazio avanzato
             foreach (Control _ in stack.Controls) stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -166,7 +176,7 @@ namespace WebDeployer
             return page;
         }
 
-        private static GroupBox Section(string title, params Control[] controls)
+        private static GroupBox Section(string title, Control content)
         {
             var box = new GroupBox
             {
@@ -177,7 +187,7 @@ namespace WebDeployer
                 Padding = new Padding(8, 4, 8, 6),
                 Margin = new Padding(3, 10, 3, 3),
             };
-            box.Controls.Add(Flow(controls));
+            box.Controls.Add(content);
             return box;
         }
 
@@ -232,11 +242,16 @@ namespace WebDeployer
         {
             if (_busy) return;
             _busy = true;
+            _actionCancel = new CancellationTokenSource();
             UpdateButtons();
             SetStatus(name + " in corso...");
             try
             {
                 await action();
+            }
+            catch (Exception ex) when (ex is OperationCanceledException || _actionCancel.IsCancellationRequested)
+            {
+                Log("Operazione annullata.");
             }
             catch (Exception ex)
             {
@@ -244,16 +259,23 @@ namespace WebDeployer
             }
             finally
             {
+                _actionCancel.Dispose();
+                _actionCancel = null;
                 _busy = false;
+                _progress.Visible = false;
                 UpdateButtons();
                 SetStatus("Pronto");
             }
         }
 
+        /// <summary>Token dell'operazione in corso (annullato dal pulsante "Annulla operazione").</summary>
+        private CancellationToken ActionToken => _actionCancel?.Token ?? CancellationToken.None;
+
         private void UpdateButtons()
         {
             foreach (var button in _actionButtons)
                 button.Enabled = !_busy;
+            _cancelButton.Enabled = _busy;
 
             var previewRunning = _previewCancel != null;
             _previewButton.Enabled = !_busy && !previewRunning;
@@ -306,7 +328,7 @@ namespace WebDeployer
             }
 
             Log($"git clone {url}");
-            var code = await Git.CloneAsync(url, folder, LogTool);
+            var code = await Git.CloneAsync(url, folder, LogTool, ActionToken);
             Log(code == 0 ? $"Clone completato in {folder}" : $"Clone fallito (codice {code}).");
         }
 
@@ -320,7 +342,7 @@ namespace WebDeployer
                 return false;
             }
             Log("git pull");
-            var code = await Git.PullAsync(folder, LogTool);
+            var code = await Git.PullAsync(folder, LogTool, ActionToken);
             Log(code == 0 ? "Aggiornamento completato." : $"git pull fallito (codice {code}).");
             return code == 0;
         }
@@ -352,13 +374,13 @@ namespace WebDeployer
             if (Npm.HasLockFile(folder))
             {
                 Log("npm ci (installazione delle dipendenze: la prima volta può richiedere qualche minuto)");
-                code = await Npm.RunAsync("ci", folder, LogTool);
+                code = await Npm.RunAsync("ci", folder, LogTool, ActionToken);
                 if (code != 0) Log("npm ci non riuscito: riprovo con npm install.");
             }
             if (code != 0)
             {
                 Log("npm install (installazione delle dipendenze: la prima volta può richiedere qualche minuto)");
-                code = await Npm.RunAsync("install --no-package-lock", folder, LogTool);
+                code = await Npm.RunAsync("install --no-package-lock", folder, LogTool, ActionToken);
             }
             if (code != 0)
             {
@@ -422,7 +444,7 @@ namespace WebDeployer
             var output = OutputFolder(folder);
             Log("npm run build");
             var timer = Stopwatch.StartNew();
-            var code = await Npm.RunAsync("run build", folder, LogTool);
+            var code = await Npm.RunAsync("run build", folder, LogTool, ActionToken);
             if (code != 0)
             {
                 Log($"Build fallita (codice {code}).");
@@ -453,6 +475,7 @@ namespace WebDeployer
         {
             int code;
             try { code = await server; }
+            catch (OperationCanceledException) { code = -1; } // fermata con Stop
             catch (Exception ex) { Log("ERRORE preview: " + ex.Message); code = -1; }
 
             var stoppedByUser = cancel.IsCancellationRequested;
@@ -636,12 +659,42 @@ namespace WebDeployer
             Log($"Test connessione FTP: {target}");
             try
             {
-                await FtpDeployer.TestAsync(target, Log);
+                await FtpDeployer.TestAsync(target, Log, ActionToken);
                 Log("Connessione FTP riuscita.");
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
             {
                 Log("Connessione FTP non riuscita: " + FtpDeployer.Explain(ex));
+            }
+        }
+
+        /// <summary>Carica la build sul server FTP. Restituisce true se il caricamento è completo.</summary>
+        private async Task<bool> DeployAsync()
+        {
+            var output = OutputFolder(_localFolder.Text);
+            if (!File.Exists(Path.Combine(output, "index.html")))
+            {
+                Log("Non c'è ancora una build da caricare: premi Build.");
+                return false;
+            }
+            var target = ReadFtpTarget();
+            if (target == null) return false;
+
+            Log($"Caricamento via FTP di {output} su {target}");
+            _progress.Value = 0;
+            _progress.Visible = true;
+            var progress = new Progress<double>(p => _progress.Value = Math.Max(0, Math.Min(100, (int)(p * 100))));
+            try
+            {
+                var timer = Stopwatch.StartNew();
+                var result = await FtpDeployer.UploadAsync(target, output, Log, progress, ActionToken);
+                Log($"Caricamento completato in {timer.Elapsed.TotalSeconds:0.0} s: {result}.");
+                return true;
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException) && !ActionToken.IsCancellationRequested)
+            {
+                Log("Caricamento non riuscito: " + FtpDeployer.Explain(ex));
+                return false;
             }
         }
 
@@ -658,6 +711,13 @@ namespace WebDeployer
             var clear = new Button { Text = "Pulisci", AutoSize = true };
             clear.Click += (s, e) => _log.Clear();
             header.Controls.Add(clear);
+            _cancelButton = new Button { Text = "Annulla operazione", AutoSize = true, Enabled = false };
+            _cancelButton.Click += (s, e) =>
+            {
+                Log("Annullamento in corso...");
+                _actionCancel?.Cancel();
+            };
+            header.Controls.Add(_cancelButton);
 
             var panel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(6, 0, 6, 6) };
             panel.Controls.Add(_log);

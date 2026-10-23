@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace WebDeployer.Core
@@ -23,16 +24,16 @@ namespace WebDeployer.Core
                 || Directory.Exists(url);
         }
 
-        public static Task<int> CloneAsync(string url, string folder, Action<string> onOutput)
+        public static Task<int> CloneAsync(string url, string folder, Action<string> onOutput, CancellationToken cancel = default)
         {
             var parent = Path.GetDirectoryName(folder);
             Directory.CreateDirectory(parent);
-            return ProcessRunner.RunAsync("git", $"clone {Quote(url)} {Quote(folder)}", parent, onOutput);
+            return ProcessRunner.RunAsync("git", $"clone {Quote(url)} {Quote(folder)}", parent, onOutput, cancel);
         }
 
         /// <summary>git pull solo "fast-forward": non crea mai merge e si ferma se ci sono modifiche locali in conflitto.</summary>
-        public static Task<int> PullAsync(string folder, Action<string> onOutput) =>
-            ProcessRunner.RunAsync("git", "pull --ff-only", folder, onOutput);
+        public static Task<int> PullAsync(string folder, Action<string> onOutput, CancellationToken cancel = default) =>
+            ProcessRunner.RunAsync("git", "pull --ff-only", folder, onOutput, cancel);
 
         public static async Task<string> RemoteUrlAsync(string folder)
         {

@@ -14,7 +14,8 @@ namespace WebDeployer.Core
 
         /// <summary>
         /// Avvia il processo e attende che termini, restituendo il codice di uscita.
-        /// Annullando il token si chiude l'intero albero di processi (es. cmd → npm → node).
+        /// Annullando il token si chiude l'intero albero di processi (es. cmd → npm → node)
+        /// e viene lanciata OperationCanceledException.
         /// </summary>
         public static Task<int> RunAsync(string fileName, string arguments, string workingDir,
             Action<string> onOutput, CancellationToken cancel = default)
@@ -38,6 +39,7 @@ namespace WebDeployer.Core
 
                     using (cancel.Register(() => KillTree(p.Id)))
                         p.WaitForExit();
+                    cancel.ThrowIfCancellationRequested();
                     return p.ExitCode;
                 }
             });

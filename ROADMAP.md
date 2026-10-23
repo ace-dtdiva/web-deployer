@@ -9,7 +9,7 @@ Ogni step lascia l'app compilabile e funzionante, con un commit dedicato.
 - [x] 3. Preview: `npm install` quando serve, `npm run dev`, apertura del browser, Stop
 - [x] 4. Build: `npm run build`, esito e cartella di output
 - [x] 5. Scheda FTP: dati di connessione (FTP/FTPS), password chiesta e mai salvata, Test connessione
-- [ ] 6. Upload manuale della build, con avanzamento e annullamento
+- [x] 6. Upload manuale della build, con avanzamento e annullamento
 - [ ] 7. Auto deploy: upload automatico dopo una build riuscita
 - [ ] 8. Upload incrementale (solo i file cambiati) con pulizia opzionale dei file obsoleti
 - [ ] 9. Rifinitura: icona, messaggi d'errore, README, exe finale
