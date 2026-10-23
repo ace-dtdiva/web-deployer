@@ -4,7 +4,7 @@
 Ogni step lascia l'app compilabile e funzionante, con un commit dedicato.
 
 - [x] 0. Setup: repo, scheletro dell'app (schede Progetto/FTP, pannello log), script di build
-- [ ] 1. Progetto singolo: URL del repo e impostazioni salvate in `settings.json` accanto all'exe
+- [x] 1. Progetto singolo: URL del repo e impostazioni salvate in `settings.json` accanto all'exe
 - [ ] 2. Git: controllo di Git/Node/npm, clone e aggiornamento (git pull)
 - [ ] 3. Preview: `npm install` quando serve, `npm run dev`, apertura del browser, Stop
 - [ ] 4. Build: `npm run build`, esito e cartella di output
