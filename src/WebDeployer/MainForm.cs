@@ -271,6 +271,9 @@ namespace WebDeployer
             var folder = _localFolder.Text;
             if (!ProjectReady(folder) || !await EnsureInstalledAsync(folder)) return false;
 
+            // Le foto dei siti Lovable non stanno nel repository: senza di loro l'anteprima è vuota
+            await LovableAssets.EnsureDownloadedAsync(folder, Log);
+
             var cancel = new CancellationTokenSource();
             _previewCancel = cancel;
             SetPreviewState(PreviewState.Starting);
@@ -348,16 +351,22 @@ namespace WebDeployer
                 await StopPreviewAsync();
             }
             if (!await EnsureInstalledAsync(folder)) return false;
+            await LovableAssets.EnsureDownloadedAsync(folder, Log, ActionToken);
 
-            var output = OutputFolder(folder);
             Log("npm run build");
             var timer = Stopwatch.StartNew();
-            var code = await Npm.RunAsync("run build", folder, LogTool, ActionToken);
+            var code = await Npm.RunAsync("run build", folder, LogTool, ActionToken, Prerender.BuildEnvironment(folder));
             if (code != 0)
             {
                 Log($"Build fallita (codice {code}).");
                 return false;
             }
+
+            // I siti TanStack Start costruiscono le pagine solo mentre girano: ce le facciamo dare qui,
+            // altrimenti non c'è nessun .html da caricare sull'hosting
+            if (Prerender.IsTanStackStart(folder) && !await Prerender.RunAsync(folder, Log, LogTool, ActionToken)) return false;
+
+            var output = OutputFolder(folder);
             if (!File.Exists(Path.Combine(output, "index.html")))
             {
                 Log($"La build è terminata ma {Path.Combine(output, "index.html")} non esiste: controlla la cartella di output.");
@@ -502,7 +511,15 @@ namespace WebDeployer
         {
             if (string.IsNullOrEmpty(projectFolder)) return "";
             var dir = string.IsNullOrWhiteSpace(_settings.BuildOutputDir) ? "dist" : _settings.BuildOutputDir;
-            return Path.Combine(projectFolder, dir);
+            var folder = Path.Combine(projectFolder, dir);
+
+            // I template nuovi di Lovable non scrivono in "dist" ma in .output\public
+            if (!Directory.Exists(folder))
+            {
+                var nitro = Path.Combine(projectFolder, Prerender.PublicDir);
+                if (Directory.Exists(nitro)) return nitro;
+            }
+            return folder;
         }
 
         private void SaveSettings()

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -35,8 +36,9 @@ namespace WebDeployer.Core
             File.WriteAllText(Path.Combine(folder, "node_modules", InstallMarker), DateTime.Now.ToString("s"));
 
         /// <summary>Esegue "npm &lt;args&gt;" nella cartella del progetto; npm e node si chiudono se si chiude WebDeployer.</summary>
-        public static Task<int> RunAsync(string args, string folder, Action<string> onOutput, CancellationToken cancel = default) =>
-            ProcessRunner.RunAsync("cmd.exe", "/d /c npm " + args, folder, onOutput, cancel, killWithApp: true);
+        public static Task<int> RunAsync(string args, string folder, Action<string> onOutput, CancellationToken cancel = default,
+            IDictionary<string, string> env = null) =>
+            ProcessRunner.RunAsync("cmd.exe", "/d /c npm " + args, folder, onOutput, cancel, killWithApp: true, env: env);
 
         /// <summary>L'indirizzo locale del server di sviluppo, se la riga lo contiene.</summary>
         public static string FindLocalUrl(string line)

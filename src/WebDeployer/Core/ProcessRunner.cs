@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -18,12 +19,14 @@ namespace WebDeployer.Core
         /// e viene lanciata OperationCanceledException.
         /// </summary>
         /// <param name="killWithApp">Lega il processo (e i suoi figli) a WebDeployer: si chiude se l'app si chiude.</param>
+        /// <param name="env">Variabili d'ambiente aggiuntive per questo solo processo.</param>
         public static Task<int> RunAsync(string fileName, string arguments, string workingDir,
-            Action<string> onOutput, CancellationToken cancel = default, bool killWithApp = false)
+            Action<string> onOutput, CancellationToken cancel = default, bool killWithApp = false,
+            IDictionary<string, string> env = null)
         {
             return Task.Run(() =>
             {
-                using (var p = new Process { StartInfo = CreateStartInfo(fileName, arguments, workingDir) })
+                using (var p = new Process { StartInfo = CreateStartInfo(fileName, arguments, workingDir, env) })
                 {
                     DataReceivedEventHandler forward = (s, e) =>
                     {
@@ -70,7 +73,8 @@ namespace WebDeployer.Core
             }
         }
 
-        private static ProcessStartInfo CreateStartInfo(string fileName, string arguments, string workingDir)
+        private static ProcessStartInfo CreateStartInfo(string fileName, string arguments, string workingDir,
+            IDictionary<string, string> env)
         {
             var psi = new ProcessStartInfo(fileName, arguments)
             {
@@ -91,6 +95,9 @@ namespace WebDeployer.Core
             psi.EnvironmentVariables["BROWSER"] = "none";
             psi.EnvironmentVariables["NPM_CONFIG_UPDATE_NOTIFIER"] = "false";
             psi.EnvironmentVariables["NPM_CONFIG_FUND"] = "false";
+
+            if (env != null)
+                foreach (var variable in env) psi.EnvironmentVariables[variable.Key] = variable.Value;
             return psi;
         }
     }

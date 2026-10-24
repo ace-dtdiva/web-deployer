@@ -64,6 +64,22 @@ Da qui in poi si può passare ad **Anita friendly**: la modalità scelta viene r
     il log mostra le righe da aggiungere a mano;
   - non serve per gli hosting Nginx o IIS, che ignorano il `.htaccess`.
 
+## Siti Lovable con il template nuovo (TanStack Start)
+I progetti creati dai template recenti di Lovable non sono siti statici, e caricati così com'escono
+dalla build darebbero una pagina vuota o senza foto. WebDeployer li riconosce da solo e ci pensa lui:
+
+- **Le foto non stanno nel repository**: in `src\assets` ci sono solo dei puntatori (`*.asset.json`)
+  a immagini che Lovable tiene sui suoi server. Prima della build WebDeployer scarica quelle che
+  mancano in `public\__l5e\...`, dove Vite le prende e le copia nel sito; restano lì per le volte
+  dopo, quindi si scarica solo quello che è cambiato. Servono anche all'anteprima, che senza di loro
+  si vede bianca.
+- **La build non produce pagine `.html`**: `npm run build` fa un programma che costruisce le pagine
+  mentre il visitatore le chiede, e di norma lo fa per Cloudflare. WebDeployer costruisce con il
+  preset `node`, avvia il sito sul PC per qualche secondo, si fa dare tutte le pagine e le salva
+  (`/contatti` diventa `contatti\index.html`). Il risultato è un sito statico normale.
+- **La cartella da caricare è `.output\public`** invece di `dist`: viene usata in automatico quando
+  `dist` non esiste.
+
 ## Problemi comuni
 | Messaggio | Cosa fare |
 |---|---|
