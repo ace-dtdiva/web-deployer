@@ -37,6 +37,14 @@ namespace WebDeployer
         private static readonly string[] EncryptionValues = { FtpTarget.EncryptionAuto, FtpTarget.EncryptionRequired, FtpTarget.EncryptionNone };
         private static readonly string[] EncryptionLabels = { "FTPS se disponibile (consigliato)", "Solo FTPS (TLS esplicito)", "FTP non cifrato" };
 
+        private static readonly string[] ProjectKindValues = { Settings.KindAuto, Settings.KindStatic, Settings.KindLovable };
+        private static readonly string[] ProjectKindLabels =
+        {
+            "Automatico (consigliato)",
+            "Generico: la build è già il sito",
+            "Lovable: scarica le foto e genera le pagine",
+        };
+
         private enum StatusKind { Ready, Busy, Success, Error }
         private enum PreviewState { Stopped, Starting, Running }
 
@@ -272,7 +280,7 @@ namespace WebDeployer
             if (!ProjectReady(folder) || !await EnsureInstalledAsync(folder)) return false;
 
             // Le foto dei siti Lovable non stanno nel repository: senza di loro l'anteprima è vuota
-            await LovableAssets.EnsureDownloadedAsync(folder, Log);
+            if (DownloadsPhotos(folder)) await LovableAssets.EnsureDownloadedAsync(folder, Log);
 
             var cancel = new CancellationTokenSource();
             _previewCancel = cancel;
@@ -351,11 +359,13 @@ namespace WebDeployer
                 await StopPreviewAsync();
             }
             if (!await EnsureInstalledAsync(folder)) return false;
-            await LovableAssets.EnsureDownloadedAsync(folder, Log, ActionToken);
+
+            var generatesPages = GeneratesPages(folder);
+            if (DownloadsPhotos(folder)) await LovableAssets.EnsureDownloadedAsync(folder, Log, ActionToken);
 
             Log("npm run build");
             var timer = Stopwatch.StartNew();
-            var code = await Npm.RunAsync("run build", folder, LogTool, ActionToken, Prerender.BuildEnvironment(folder));
+            var code = await Npm.RunAsync("run build", folder, LogTool, ActionToken, generatesPages ? Prerender.BuildEnvironment() : null);
             if (code != 0)
             {
                 Log($"Build fallita (codice {code}).");
@@ -364,7 +374,7 @@ namespace WebDeployer
 
             // I siti TanStack Start costruiscono le pagine solo mentre girano: ce le facciamo dare qui,
             // altrimenti non c'è nessun .html da caricare sull'hosting
-            if (Prerender.IsTanStackStart(folder) && !await Prerender.RunAsync(folder, Log, LogTool, ActionToken)) return false;
+            if (generatesPages && !await Prerender.RunAsync(folder, Log, LogTool, ActionToken)) return false;
 
             var output = OutputFolder(folder);
             if (!File.Exists(Path.Combine(output, "index.html")))
@@ -506,6 +516,20 @@ namespace WebDeployer
             Process.Start("explorer.exe", $"\"{path}\"");
         }
 
+        /// <summary>
+        /// Le due cose in più che chiedono i siti Lovable sono indipendenti fra loro: scaricare le foto
+        /// (in src\assets ci sono solo puntatori) e generare le pagine (i progetti TanStack Start
+        /// costruiscono un sito che senza un server acceso non produce nessun .html).
+        /// Su "Automatico" ognuna delle due si decide guardando la cartella.
+        /// </summary>
+        private bool DownloadsPhotos(string folder) =>
+            _settings.ProjectKind != Settings.KindStatic &&
+            (_settings.ProjectKind == Settings.KindLovable || LovableAssets.HasPointers(folder));
+
+        private bool GeneratesPages(string folder) =>
+            _settings.ProjectKind != Settings.KindStatic &&
+            (_settings.ProjectKind == Settings.KindLovable || Prerender.IsTanStackStart(folder));
+
         /// <summary>Cartella prodotta dalla build (di solito "dist").</summary>
         private string OutputFolder(string projectFolder)
         {
@@ -531,6 +555,7 @@ namespace WebDeployer
             _settings.FtpUser = _ftpUser.Text.Trim();
             _settings.FtpRemoteDir = FtpTarget.CleanRemoteDir(_ftpRemoteDir.Text);
             _settings.FtpEncryption = EncryptionValues[Math.Max(0, _ftpEncryption.SelectedIndex)];
+            _settings.ProjectKind = ProjectKindValues[Math.Max(0, _projectKind.SelectedIndex)];
             _settings.FtpAcceptAnyCertificate = _ftpAcceptAnyCertificate.Checked;
             _settings.DeleteObsoleteFiles = _deleteObsolete.Checked;
             _settings.AddSpaHtaccess = _spaHtaccess.Checked;

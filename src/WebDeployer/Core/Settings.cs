@@ -11,6 +11,11 @@ namespace WebDeployer.Core
         public const string ModeFriendly = "friendly";
         public const string ModeProfessional = "professional";
 
+        // Come trattare il progetto: "auto" guarda cosa c'è nella cartella, gli altri due forzano
+        public const string KindAuto = "auto";
+        public const string KindStatic = "static";
+        public const string KindLovable = "lovable";
+
         [DataMember(Order = 1)] public string RepoUrl { get; set; }
         [DataMember(Order = 2)] public bool PullBeforeBuild { get; set; }
         [DataMember(Order = 3)] public string BuildOutputDir { get; set; }
@@ -29,6 +34,9 @@ namespace WebDeployer.Core
 
         /// <summary>Aggiunge il .htaccess per React Router se la build non ne ha uno suo.</summary>
         [DataMember(Order = 13)] public bool AddSpaHtaccess { get; set; }
+
+        /// <summary>Tipo di progetto: "auto", "static" (build già pronta) o "lovable" (foto da scaricare e pagine da generare).</summary>
+        [DataMember(Order = 14)] public string ProjectKind { get; set; }
 
         public Settings() => SetDefaults();
 
@@ -50,6 +58,7 @@ namespace WebDeployer.Core
             DeleteObsoleteFiles = false;
             UiMode = ModeProfessional;
             AddSpaHtaccess = true;
+            ProjectKind = KindAuto;
         }
 
         /// <summary>Carica le impostazioni; se il file è illeggibile ne fa una copia .bak e riparte dai default.</summary>

@@ -80,6 +80,12 @@ dalla build darebbero una pagina vuota o senza foto. WebDeployer li riconosce da
 - **La cartella da caricare è `.output\public`** invece di `dist`: viene usata in automatico quando
   `dist` non esiste.
 
+In Professional, sotto i pulsanti della sezione **Pubblica**, il selettore **Tipo di progetto** dice
+come trattare il progetto: *Automatico* (consigliato) riconosce da sé se ci sono foto da scaricare e
+se la build ha bisogno di generare le pagine, *Generico* pubblica la build così com'è, *Lovable* fa
+comunque tutti e due i passaggi. Le due cose sono indipendenti: un sito Lovable del template vecchio
+ha le foto da scaricare ma la build è già pronta.
+
 ## Problemi comuni
 | Messaggio | Cosa fare |
 |---|---|
@@ -106,6 +112,7 @@ Struttura del codice (`src\WebDeployer`):
 - `Ui\`: tema e controlli grafici disegnati come nel design
 - `MainForm.cs`: la logica della finestra; `MainForm.Layout.cs`: l'interfaccia e i testi delle due modalità
 
+Cos'è cambiato fra una versione e l'altra: [CHANGELOG.md](CHANGELOG.md).
 Stato dei lavori e idee future: [ROADMAP.md](ROADMAP.md).
 
 ## Componenti di terze parti

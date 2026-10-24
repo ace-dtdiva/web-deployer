@@ -47,6 +47,7 @@ namespace WebDeployer
         private LinkLabel _previewLink;
         private StatusDot _previewState;
         private CheckBox _pullBeforeBuild;
+        private ComboBox _projectKind;
 
         // Pagina FTP
         private TextBox _ftpHost;
@@ -298,6 +299,27 @@ namespace WebDeployer
                 "Esegui git pull prima del build", "Prima scarica le ultime modifiche da GitHub");
             _pullBeforeBuild.CheckedChanged += (s, e) => SaveSettings();
             publish.Controls.Add(_pullBeforeBuild);
+
+            _projectKind = new ComboBox
+            {
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Width = 300,
+                Font = Theme.Regular(14),
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 10, 0, 2),
+            };
+            _projectKind.Items.AddRange(ProjectKindLabels);
+            _projectKind.SelectedIndex = Math.Max(0, Array.IndexOf(ProjectKindValues, _settings.ProjectKind));
+            _projectKind.SelectedIndexChanged += (s, e) => SaveSettings();
+            _tips.SetToolTip(_projectKind,
+                "I siti Lovable tengono le foto sui propri server (in src\\assets ci sono solo dei puntatori)\n" +
+                "e costruiscono un sito che avrebbe bisogno di un server acceso. Per questi WebDeployer scarica\n" +
+                "le foto e si fa dare le pagine già pronte, così si possono caricare via FTP.\n" +
+                "Su «Automatico» decide da solo guardando la cartella del progetto.");
+            _proOnly.Add(AddRow(publish, "Tipo di progetto", "Tipo di progetto", _projectKind, null));
+            _proOnly.Add(AddHint(publish,
+                "Serve solo per i siti Lovable: in automatico li riconosce da sé.",
+                "Serve solo per i siti Lovable: in automatico li riconosce da sé."));
             var openBuild = Say(new FlatButton("Apri cartella build", ButtonKind.Link, IconKind.Folder) { Margin = new Padding(0, 8, 0, 0) },
                 "Apri cartella build", "Apri il sito costruito");
             openBuild.Click += (s, e) => OpenFolder(OutputFolder(_localFolder.Text), NoBuildMessage);
@@ -587,7 +609,7 @@ namespace WebDeployer
         }
 
         /// <summary>Riga etichetta (110 px) | campo | pulsanti. Ogni riga è una griglia a sé.</summary>
-        private void AddRow(Card card, string label, string friendlyLabel, Control field, Control buttons)
+        private Control AddRow(Card card, string label, string friendlyLabel, Control field, Control buttons)
         {
             var row = Grid(3);
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120f));
@@ -597,16 +619,18 @@ namespace WebDeployer
             row.Controls.Add(field, 1, 0);
             if (buttons != null) row.Controls.Add(buttons, 2, 0);
             card.Controls.Add(row);
+            return row;
         }
 
         /// <summary>Riga di aiuto in grigio sotto il campo precedente, allineata ai campi.</summary>
-        private void AddHint(Card card, string text, string friendlyText)
+        private Control AddHint(Card card, string text, string friendlyText)
         {
             var row = Grid(2);
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120f));
             row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             row.Controls.Add(Say(Hint(text), text, friendlyText), 1, 0);
             card.Controls.Add(row);
+            return row;
         }
 
         private static TableLayoutPanel Grid(int columns) => new TableLayoutPanel

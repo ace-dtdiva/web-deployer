@@ -42,10 +42,8 @@ namespace WebDeployer.Core
         /// Variabili d'ambiente per "npm run build": senza di queste il progetto verrebbe
         /// costruito per Cloudflare e non ci sarebbe nessun programma da avviare qui.
         /// </summary>
-        public static IDictionary<string, string> BuildEnvironment(string projectFolder) =>
-            IsTanStackStart(projectFolder)
-                ? new Dictionary<string, string> { { "NITRO_PRESET", "node" } }
-                : null;
+        public static IDictionary<string, string> BuildEnvironment() =>
+            new Dictionary<string, string> { { "NITRO_PRESET", "node" } };
 
         /// <summary>
         /// Avvia la build appena fatta, salva una pagina .html per ogni indirizzo del sito
@@ -56,11 +54,8 @@ namespace WebDeployer.Core
         {
             var entry = Path.Combine(projectFolder, ServerEntry);
             var output = Path.Combine(projectFolder, PublicDir);
-            if (!File.Exists(entry))
-            {
-                log($"Non trovo {ServerEntry}: non posso generare le pagine del sito.");
-                return false;
-            }
+            // Non c'è niente da avviare: la build ha già prodotto le pagine (progetto Vite normale)
+            if (!File.Exists(entry)) return true;
 
             var port = FreePort();
             var address = "http://127.0.0.1:" + port;
